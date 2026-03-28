@@ -10,7 +10,7 @@ const DEFAULT_SHORTCUTS = {
   "docs": { url: "https://docs.google.com", description: "Google Docs" },
   "li": { url: "https://linkedin.com", description: "LinkedIn" },
   "n": { url: "https://notion.so", description: "Notion" },
-  // Personalized shortcuts (from Chrome history & Gmail analysis)
+  // Personalized shortcuts
   "ow": { url: "https://outlook.office.com/mail/", description: "Waymo Work Email (Outlook)" },
   "rm": { url: "https://app.rocketmoney.com/", description: "Rocket Money Dashboard" },
   "oura": { url: "https://cloud.ouraring.com/", description: "Oura Ring Dashboard" },
@@ -37,23 +37,71 @@ const DEFAULT_SHORTCUTS = {
   "cos": { url: "https://www.costco.com/", description: "Costco" }
 };
 
-// Initialize default shortcuts on install
-chrome.runtime.onInstalled.addListener(async () => {
-  const { shortcuts } = await chrome.storage.sync.get("shortcuts");
-  if (!shortcuts) {
-    await chrome.storage.sync.set({ shortcuts: DEFAULT_SHORTCUTS });
-  }
-});
+// --- Storage ---
 
-// Load shortcuts from storage
 async function getShortcuts() {
   const { shortcuts } = await chrome.storage.sync.get("shortcuts");
   return shortcuts || DEFAULT_SHORTCUTS;
 }
 
-// Intercept navigation to short hostnames (e.g., http://c/ → Google Calendar)
-chrome.webNavigation.onBeforeNavigate.addListener(async (details) => {
-  // Only handle top-level frame navigations
+// --- DNR Rule Sync ---
+// Syncs all shortcuts as declarativeNetRequest dynamic redirect rules.
+// These fire BEFORE DNS resolution, so no /etc/hosts needed.
+
+async function syncRulesToDNR() {
+  const shortcuts = await getShortcuts();
+
+  // Remove all existing dynamic rules first
+  const existingRules = await chrome.declarativeNetRequest.getDynamicRules();
+  const removeIds = existingRules.map(r => r.id);
+
+  // Build new rules — one per shortcut
+  const addRules = [];
+  let id = 1;
+
+  for (const [key, value] of Object.entries(shortcuts)) {
+    // Rule for http://<key>/ and http://<key>
+    addRules.push({
+      id: id++,
+      priority: 1,
+      action: { type: "redirect", redirect: { url: value.url } },
+      condition: {
+        urlFilter: `||${key}/`,
+        resourceTypes: ["main_frame"]
+      }
+    });
+  }
+
+  // Add rule for r/ → extension options page
+  addRules.push({
+    id: id++,
+    priority: 2,
+    action: { type: "redirect", redirect: { extensionPath: "/options.html" } },
+    condition: {
+      urlFilter: "||r/",
+      resourceTypes: ["main_frame"]
+    }
+  });
+
+  await chrome.declarativeNetRequest.updateDynamicRules({
+    removeRuleIds: removeIds,
+    addRules: addRules
+  });
+}
+
+// --- Install ---
+
+chrome.runtime.onInstalled.addListener(async () => {
+  const { shortcuts } = await chrome.storage.sync.get("shortcuts");
+  if (!shortcuts) {
+    await chrome.storage.sync.set({ shortcuts: DEFAULT_SHORTCUTS });
+  }
+  await syncRulesToDNR();
+});
+
+// --- Fallback: catch failed navigations for short hostnames ---
+
+chrome.webNavigation.onErrorOccurred.addListener(async (details) => {
   if (details.frameId !== 0) return;
 
   let url;
@@ -64,21 +112,32 @@ chrome.webNavigation.onBeforeNavigate.addListener(async (details) => {
   }
 
   const hostname = url.hostname.toLowerCase();
-
-  // Only match single-label hostnames (no dots = short hostname like "c", "gh", "docs")
   if (hostname.includes(".")) return;
 
   const shortcuts = await getShortcuts();
-
   if (shortcuts[hostname]) {
     chrome.tabs.update(details.tabId, { url: shortcuts[hostname].url });
   }
 });
 
-// Provide defaults to options page via messaging
+// --- Message handler ---
+
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+  if (msg.type === "updateRules") {
+    syncRulesToDNR().then(() => sendResponse({ ok: true }));
+    return true;
+  }
   if (msg.type === "getDefaults") {
     sendResponse(DEFAULT_SHORTCUTS);
     return true;
+  }
+});
+
+// --- Storage change listener ---
+// Sync DNR rules whenever shortcuts change (e.g., from another device via sync)
+
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area === "sync" && changes.shortcuts) {
+    syncRulesToDNR();
   }
 });

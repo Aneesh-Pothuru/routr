@@ -1,9 +1,10 @@
 {
   "manifest_version": 3,
   "name": "Routr - URL Shortcuts",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "description": "Type shortcuts like c/ or gh/ in your address bar to instantly navigate to your favorite sites.",
-  "permissions": ["storage", "webNavigation", "tabs"],
+  "permissions": ["storage", "webNavigation", "tabs", "declarativeNetRequest"],
+  "host_permissions": ["*://*/*"],
   "background": {
     "service_worker": "background.js"
   },

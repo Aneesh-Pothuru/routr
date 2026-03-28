@@ -1,7 +1,41 @@
 let shortcuts = {};
 let editingKey = null;
+let activeCategory = "all";
+
+// --- Category Detection ---
+
+const CATEGORY_MAP = [
+  { pattern: /outlook\.office|waymo\.solium/, category: "Work", css: "cat-work" },
+  { pattern: /rocketmoney|healthequity|vanguard|robinhood|fidelity|capitalone|chase\.com|mercury\.com|biltrewards/, category: "Finance", css: "cat-finance" },
+  { pattern: /github|console\.cloud\.google|excalidraw|digitalocean|neetcode/, category: "Dev", css: "cat-dev" },
+  { pattern: /ouraring|ucsfmychart/, category: "Health", css: "cat-health" },
+  { pattern: /claude\.ai|openai\.com|gemini\.google/, category: "AI", css: "cat-ai" },
+  { pattern: /calendar\.google|mail\.google|drive\.google|docs\.google|sheets\.google|slides\.google|maps\.google/, category: "Google", css: "cat-google" },
+  { pattern: /amazon\.com|costco\.com|doordash\.com/, category: "Shopping", css: "cat-shopping" },
+  { pattern: /linkedin|youtube|lu\.ma/, category: "Social", css: "cat-social" },
+  { pattern: /att\.com/, category: "Other", css: "cat-other" },
+  { pattern: /notion\.so/, category: "Other", css: "cat-other" }
+];
+
+function getCategoryForUrl(url) {
+  for (const entry of CATEGORY_MAP) {
+    if (entry.pattern.test(url)) {
+      return { name: entry.category, css: entry.css };
+    }
+  }
+  return { name: "Other", css: "cat-other" };
+}
+
+function getAllCategories() {
+  const cats = new Set();
+  for (const value of Object.values(shortcuts)) {
+    cats.add(getCategoryForUrl(value.url).name);
+  }
+  return [...cats].sort();
+}
 
 // --- Storage ---
+
 async function loadShortcuts() {
   const { shortcuts } = await chrome.storage.sync.get("shortcuts");
   return shortcuts || {};
@@ -10,9 +44,12 @@ async function loadShortcuts() {
 async function saveShortcuts(data) {
   await chrome.storage.sync.set({ shortcuts: data });
   shortcuts = data;
+  // Sync DNR redirect rules
+  chrome.runtime.sendMessage({ type: "updateRules" });
 }
 
 // --- Toast ---
+
 function showToast(message, isError = false) {
   const toast = document.getElementById("toast");
   toast.textContent = message;
@@ -22,6 +59,7 @@ function showToast(message, isError = false) {
 }
 
 // --- Validation ---
+
 function validateKey(key) {
   return /^[a-z0-9\-_]+$/.test(key);
 }
@@ -35,16 +73,71 @@ function validateUrl(url) {
   }
 }
 
+// --- Stats ---
+
+function updateStats() {
+  document.getElementById("stat-total").textContent = Object.keys(shortcuts).length;
+  document.getElementById("stat-categories").textContent = getAllCategories().length;
+}
+
+// --- Category Tabs ---
+
+function renderCategoryTabs() {
+  const container = document.getElementById("category-tabs");
+  const categories = getAllCategories();
+
+  container.innerHTML = '<button class="cat-tab active" data-category="all">All</button>';
+  for (const cat of categories) {
+    const btn = document.createElement("button");
+    btn.className = "cat-tab";
+    btn.dataset.category = cat;
+    btn.textContent = cat;
+    container.appendChild(btn);
+  }
+
+  // Restore active state
+  if (activeCategory !== "all") {
+    const allBtn = container.querySelector('[data-category="all"]');
+    allBtn.classList.remove("active");
+    const activeBtn = container.querySelector(`[data-category="${activeCategory}"]`);
+    if (activeBtn) activeBtn.classList.add("active");
+    else {
+      activeCategory = "all";
+      allBtn.classList.add("active");
+    }
+  }
+
+  container.addEventListener("click", (e) => {
+    const btn = e.target.closest(".cat-tab");
+    if (!btn) return;
+    container.querySelectorAll(".cat-tab").forEach(b => b.classList.remove("active"));
+    btn.classList.add("active");
+    activeCategory = btn.dataset.category;
+    renderShortcuts(document.getElementById("search").value);
+  });
+}
+
 // --- Rendering ---
+
 function renderShortcuts(filter = "") {
   const list = document.getElementById("shortcuts-list");
   list.innerHTML = "";
 
   const entries = Object.entries(shortcuts)
     .filter(([key, value]) => {
-      if (!filter) return true;
-      const q = filter.toLowerCase();
-      return key.includes(q) || value.url.toLowerCase().includes(q) || value.description.toLowerCase().includes(q);
+      // Text filter
+      if (filter) {
+        const q = filter.toLowerCase();
+        if (!key.includes(q) && !value.url.toLowerCase().includes(q) && !value.description.toLowerCase().includes(q)) {
+          return false;
+        }
+      }
+      // Category filter
+      if (activeCategory !== "all") {
+        const cat = getCategoryForUrl(value.url);
+        if (cat.name !== activeCategory) return false;
+      }
+      return true;
     })
     .sort(([a], [b]) => a.localeCompare(b));
 
@@ -54,6 +147,7 @@ function renderShortcuts(filter = "") {
   }
 
   for (const [key, value] of entries) {
+    const cat = getCategoryForUrl(value.url);
     const row = document.createElement("div");
     row.className = "shortcut-row";
 
@@ -61,6 +155,7 @@ function renderShortcuts(filter = "") {
       row.classList.add("editing");
       row.innerHTML = `
         <div><input type="text" class="edit-key" value="${escapeHtml(key)}"></div>
+        <div></div>
         <div><input type="url" class="edit-url" value="${escapeHtml(value.url)}"></div>
         <div><input type="text" class="edit-desc" value="${escapeHtml(value.description)}"></div>
         <div class="shortcut-actions">
@@ -76,7 +171,8 @@ function renderShortcuts(filter = "") {
     } else {
       row.innerHTML = `
         <div><span class="shortcut-key">${escapeHtml(key)}/</span></div>
-        <div class="shortcut-url"><a href="${escapeHtml(value.url)}" target="_blank">${escapeHtml(value.url)}</a></div>
+        <div><span class="shortcut-cat ${cat.css}">${cat.name}</span></div>
+        <div class="shortcut-url"><a href="${escapeHtml(value.url)}" target="_blank">${escapeHtml(value.url.replace(/^https?:\/\//, ""))}</a></div>
         <div class="shortcut-desc">${escapeHtml(value.description)}</div>
         <div class="shortcut-actions">
           <button class="btn btn-sm btn-edit edit-btn">Edit</button>
@@ -101,6 +197,7 @@ function escapeHtml(str) {
 }
 
 // --- CRUD ---
+
 async function handleAdd(e) {
   e.preventDefault();
 
@@ -138,8 +235,10 @@ async function handleAdd(e) {
   urlInput.value = "";
   descInput.value = "";
 
+  updateStats();
+  renderCategoryTabs();
   renderShortcuts(document.getElementById("search").value);
-  showToast(`Shortcut "${key}/" added!`);
+  showToast(`Shortcut "${key}/" added and ready to use!`);
 }
 
 async function handleDelete(key) {
@@ -148,6 +247,8 @@ async function handleDelete(key) {
   delete shortcuts[key];
   await saveShortcuts(shortcuts);
 
+  updateStats();
+  renderCategoryTabs();
   renderShortcuts(document.getElementById("search").value);
   showToast(`Shortcut "${key}/" deleted.`);
 }
@@ -184,16 +285,20 @@ async function handleSaveEdit(oldKey, row) {
   await saveShortcuts(shortcuts);
 
   editingKey = null;
+  updateStats();
+  renderCategoryTabs();
   renderShortcuts(document.getElementById("search").value);
   showToast(`Shortcut "${newKey}/" updated!`);
 }
 
 // --- Search ---
+
 function handleSearch(e) {
   renderShortcuts(e.target.value);
 }
 
 // --- Export ---
+
 function handleExport() {
   const data = JSON.stringify(shortcuts, null, 2);
   const blob = new Blob([data], { type: "application/json" });
@@ -207,6 +312,7 @@ function handleExport() {
 }
 
 // --- Import ---
+
 function handleImport(e) {
   const file = e.target.files[0];
   if (!file) return;
@@ -216,7 +322,6 @@ function handleImport(e) {
     try {
       const data = JSON.parse(event.target.result);
 
-      // Validate shape
       for (const [key, value] of Object.entries(data)) {
         if (!value.url || !value.description) {
           showToast("Invalid file: each shortcut must have 'url' and 'description'.", true);
@@ -226,6 +331,8 @@ function handleImport(e) {
 
       shortcuts = data;
       await saveShortcuts(shortcuts);
+      updateStats();
+      renderCategoryTabs();
       renderShortcuts();
       showToast(`Imported ${Object.keys(data).length} shortcuts!`);
     } catch {
@@ -237,6 +344,7 @@ function handleImport(e) {
 }
 
 // --- Reset ---
+
 async function handleReset() {
   if (!confirm("Reset all shortcuts to defaults? This cannot be undone.")) return;
 
@@ -244,7 +352,6 @@ async function handleReset() {
     const defaults = await chrome.runtime.sendMessage({ type: "getDefaults" });
     shortcuts = defaults;
   } catch {
-    // Fallback defaults if messaging fails
     shortcuts = {
       "c": { url: "https://calendar.google.com", description: "Google Calendar" },
       "m": { url: "https://mail.google.com", description: "Gmail" },
@@ -284,11 +391,14 @@ async function handleReset() {
   }
 
   await saveShortcuts(shortcuts);
+  updateStats();
+  renderCategoryTabs();
   renderShortcuts();
   showToast("Shortcuts reset to defaults!");
 }
 
 // --- Query param handling ---
+
 function checkQueryParams() {
   const params = new URLSearchParams(window.location.search);
   const addKey = params.get("add");
@@ -298,11 +408,57 @@ function checkQueryParams() {
   }
 }
 
+// --- Demo animation ---
+
+function startDemoAnimation() {
+  const el = document.getElementById("demo-text");
+  const demos = [
+    { text: "c/", result: "calendar.google.com" },
+    { text: "gh/", result: "github.com" },
+    { text: "cl/", result: "claude.ai" },
+    { text: "ow/", result: "outlook.office.com" }
+  ];
+  let demoIdx = 0;
+
+  function animateDemo() {
+    const demo = demos[demoIdx % demos.length];
+    demoIdx++;
+
+    let charIdx = 0;
+    el.textContent = "";
+
+    // Type the shortcut
+    const typeInterval = setInterval(() => {
+      charIdx++;
+      el.textContent = demo.text.substring(0, charIdx);
+      if (charIdx >= demo.text.length) {
+        clearInterval(typeInterval);
+        // Pause, then show result
+        setTimeout(() => {
+          el.innerHTML = `<span style="color: #8b949e">${demo.result}</span>`;
+          // Pause, then clear for next
+          setTimeout(() => {
+            el.textContent = "";
+            setTimeout(animateDemo, 600);
+          }, 2000);
+        }, 500);
+      }
+    }, 150);
+  }
+
+  setTimeout(animateDemo, 800);
+}
+
 // --- Init ---
+
 document.addEventListener("DOMContentLoaded", async () => {
   shortcuts = await loadShortcuts();
+
+  updateStats();
+  renderCategoryTabs();
   renderShortcuts();
   checkQueryParams();
+  startDemoAnimation();
 
   document.getElementById("add-form").addEventListener("submit", handleAdd);
   document.getElementById("search").addEventListener("input", handleSearch);
