@@ -9,7 +9,7 @@ HOSTS_FILE="/etc/hosts"
 MARKER="# Routr URL Shortcuts"
 
 # Default short hostnames to register
-HOSTNAMES="c m d gh yt r gpt cl docs sheets slides li maps n"
+HOSTNAMES="c m d gh yt gpt cl docs li n ow rm oura hi hsa vg nc mc gcp ms rh fi cap ch gem ex do merc bilt dd luma az att cos"
 
 # Check if already set up
 if grep -q "$MARKER" "$HOSTS_FILE" 2>/dev/null; then
