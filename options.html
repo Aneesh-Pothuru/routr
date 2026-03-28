@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Routr - Configure Shortcuts</title>
+  <link rel="stylesheet" href="options.css">
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>Routr</h1>
+      <p class="subtitle">Configure your URL shortcuts. Type <code>go</code> in your address bar, then a shortcut.</p>
+    </header>
+
+    <section class="add-section">
+      <h2>Add New Shortcut</h2>
+      <form id="add-form">
+        <div class="form-row">
+          <div class="form-group">
+            <label for="shortcut-key">Shortcut</label>
+            <input type="text" id="shortcut-key" placeholder="e.g., c" required>
+          </div>
+          <div class="form-group">
+            <label for="shortcut-url">URL</label>
+            <input type="url" id="shortcut-url" placeholder="e.g., https://calendar.google.com" required>
+          </div>
+          <div class="form-group">
+            <label for="shortcut-desc">Description</label>
+            <input type="text" id="shortcut-desc" placeholder="e.g., Google Calendar" required>
+          </div>
+          <button type="submit" class="btn btn-add">Add</button>
+        </div>
+      </form>
+    </section>
+
+    <section class="search-section">
+      <input type="text" id="search" placeholder="Search shortcuts...">
+    </section>
+
+    <section class="shortcuts-section">
+      <h2>Your Shortcuts</h2>
+      <div class="shortcuts-header">
+        <span class="col-key">Shortcut</span>
+        <span class="col-url">URL</span>
+        <span class="col-desc">Description</span>
+        <span class="col-actions">Actions</span>
+      </div>
+      <div id="shortcuts-list"></div>
+    </section>
+
+    <section class="actions-section">
+      <button id="reset-btn" class="btn btn-danger">Reset to Defaults</button>
+      <button id="export-btn" class="btn btn-secondary">Export</button>
+      <button id="import-btn" class="btn btn-secondary">Import</button>
+      <input type="file" id="import-file" accept=".json" hidden>
+    </section>
+
+    <div id="toast" class="toast"></div>
+  </div>
+
+  <script src="options.js"></script>
+</body>
+</html>

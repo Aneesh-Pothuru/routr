@@ -1,0 +1,337 @@
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  background: #0f1117;
+  color: #e1e4e8;
+  min-height: 100vh;
+}
+
+.container {
+  max-width: 900px;
+  margin: 0 auto;
+  padding: 40px 24px;
+}
+
+header {
+  margin-bottom: 40px;
+}
+
+header h1 {
+  font-size: 32px;
+  font-weight: 700;
+  color: #58a6ff;
+  margin-bottom: 8px;
+}
+
+.subtitle {
+  color: #8b949e;
+  font-size: 15px;
+}
+
+.subtitle code {
+  background: #1c2030;
+  color: #79c0ff;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 14px;
+}
+
+h2 {
+  font-size: 18px;
+  font-weight: 600;
+  margin-bottom: 16px;
+  color: #c9d1d9;
+}
+
+/* Add form */
+.add-section {
+  background: #161b22;
+  border: 1px solid #30363d;
+  border-radius: 12px;
+  padding: 24px;
+  margin-bottom: 24px;
+}
+
+.form-row {
+  display: flex;
+  gap: 12px;
+  align-items: flex-end;
+}
+
+.form-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  flex: 1;
+}
+
+.form-group:first-child {
+  flex: 0.6;
+}
+
+label {
+  font-size: 13px;
+  font-weight: 500;
+  color: #8b949e;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+input[type="text"],
+input[type="url"] {
+  background: #0d1117;
+  border: 1px solid #30363d;
+  border-radius: 8px;
+  padding: 10px 14px;
+  color: #e1e4e8;
+  font-size: 14px;
+  transition: border-color 0.2s;
+}
+
+input:focus {
+  outline: none;
+  border-color: #58a6ff;
+  box-shadow: 0 0 0 3px rgba(88, 166, 255, 0.15);
+}
+
+/* Buttons */
+.btn {
+  padding: 10px 20px;
+  border: none;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+  white-space: nowrap;
+}
+
+.btn-add {
+  background: #238636;
+  color: #fff;
+}
+
+.btn-add:hover {
+  background: #2ea043;
+}
+
+.btn-danger {
+  background: transparent;
+  border: 1px solid #f85149;
+  color: #f85149;
+}
+
+.btn-danger:hover {
+  background: #f8514922;
+}
+
+.btn-secondary {
+  background: transparent;
+  border: 1px solid #30363d;
+  color: #8b949e;
+}
+
+.btn-secondary:hover {
+  background: #30363d;
+  color: #e1e4e8;
+}
+
+.btn-sm {
+  padding: 6px 12px;
+  font-size: 12px;
+}
+
+.btn-edit {
+  background: transparent;
+  border: 1px solid #58a6ff;
+  color: #58a6ff;
+}
+
+.btn-edit:hover {
+  background: #58a6ff22;
+}
+
+.btn-delete {
+  background: transparent;
+  border: 1px solid #f85149;
+  color: #f85149;
+}
+
+.btn-delete:hover {
+  background: #f8514922;
+}
+
+/* Search */
+.search-section {
+  margin-bottom: 24px;
+}
+
+.search-section input {
+  width: 100%;
+  background: #161b22;
+  border: 1px solid #30363d;
+  border-radius: 8px;
+  padding: 12px 16px;
+  color: #e1e4e8;
+  font-size: 14px;
+}
+
+/* Shortcuts list */
+.shortcuts-section {
+  background: #161b22;
+  border: 1px solid #30363d;
+  border-radius: 12px;
+  padding: 24px;
+  margin-bottom: 24px;
+}
+
+.shortcuts-header {
+  display: grid;
+  grid-template-columns: 100px 1fr 1fr 120px;
+  gap: 12px;
+  padding: 8px 12px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #8b949e;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  border-bottom: 1px solid #30363d;
+  margin-bottom: 4px;
+}
+
+.shortcut-row {
+  display: grid;
+  grid-template-columns: 100px 1fr 1fr 120px;
+  gap: 12px;
+  padding: 12px;
+  border-radius: 8px;
+  align-items: center;
+  transition: background 0.15s;
+}
+
+.shortcut-row:hover {
+  background: #1c2030;
+}
+
+.shortcut-key {
+  font-family: 'SF Mono', 'Fira Code', monospace;
+  font-size: 14px;
+  font-weight: 600;
+  color: #79c0ff;
+  background: #0d1117;
+  padding: 4px 10px;
+  border-radius: 6px;
+  display: inline-block;
+  width: fit-content;
+}
+
+.shortcut-url {
+  font-size: 13px;
+  color: #8b949e;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.shortcut-url a {
+  color: #8b949e;
+  text-decoration: none;
+}
+
+.shortcut-url a:hover {
+  color: #58a6ff;
+}
+
+.shortcut-desc {
+  font-size: 14px;
+  color: #c9d1d9;
+}
+
+.shortcut-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+/* Edit mode */
+.shortcut-row.editing {
+  background: #1c2030;
+  border: 1px solid #30363d;
+}
+
+.shortcut-row.editing input {
+  background: #0d1117;
+  border: 1px solid #30363d;
+  border-radius: 6px;
+  padding: 6px 10px;
+  color: #e1e4e8;
+  font-size: 13px;
+  width: 100%;
+}
+
+/* Actions section */
+.actions-section {
+  display: flex;
+  gap: 12px;
+}
+
+/* Toast */
+.toast {
+  position: fixed;
+  bottom: 24px;
+  right: 24px;
+  background: #238636;
+  color: #fff;
+  padding: 12px 24px;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 500;
+  opacity: 0;
+  transform: translateY(10px);
+  transition: all 0.3s;
+  pointer-events: none;
+}
+
+.toast.show {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.toast.error {
+  background: #f85149;
+}
+
+/* Empty state */
+.empty-state {
+  text-align: center;
+  padding: 40px;
+  color: #8b949e;
+}
+
+/* Responsive */
+@media (max-width: 700px) {
+  .form-row {
+    flex-direction: column;
+  }
+
+  .shortcuts-header {
+    display: none;
+  }
+
+  .shortcut-row {
+    grid-template-columns: 1fr;
+    gap: 6px;
+    border-bottom: 1px solid #30363d;
+    border-radius: 0;
+    padding: 16px 12px;
+  }
+
+  .shortcut-actions {
+    justify-content: flex-start;
+  }
+}

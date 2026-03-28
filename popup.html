@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Routr</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      width: 340px;
+      max-height: 460px;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: #0f1117;
+      color: #e1e4e8;
+    }
+    .popup-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 14px 16px 10px;
+      border-bottom: 1px solid #30363d;
+    }
+    .popup-header h1 {
+      font-size: 16px;
+      font-weight: 700;
+      color: #58a6ff;
+    }
+    .popup-header a {
+      font-size: 12px;
+      color: #8b949e;
+      cursor: pointer;
+      text-decoration: none;
+    }
+    .popup-header a:hover { color: #58a6ff; }
+    #popup-search {
+      width: 100%;
+      padding: 10px 16px;
+      background: #161b22;
+      border: none;
+      border-bottom: 1px solid #30363d;
+      color: #e1e4e8;
+      font-size: 13px;
+      outline: none;
+    }
+    #popup-search::placeholder { color: #484f58; }
+    #popup-search:focus { background: #1c2030; }
+    #popup-list {
+      max-height: 360px;
+      overflow-y: auto;
+    }
+    .popup-item {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 10px 16px;
+      cursor: pointer;
+      transition: background 0.1s;
+    }
+    .popup-item:hover { background: #1c2030; }
+    .popup-key {
+      font-family: 'SF Mono', 'Fira Code', monospace;
+      font-size: 12px;
+      font-weight: 600;
+      color: #79c0ff;
+      background: #0d1117;
+      padding: 3px 8px;
+      border-radius: 4px;
+      min-width: 40px;
+      text-align: center;
+    }
+    .popup-desc {
+      font-size: 13px;
+      color: #c9d1d9;
+      flex: 1;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .popup-url {
+      font-size: 11px;
+      color: #484f58;
+      max-width: 120px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .popup-empty {
+      text-align: center;
+      padding: 24px;
+      color: #484f58;
+      font-size: 13px;
+    }
+    #popup-list::-webkit-scrollbar { width: 6px; }
+    #popup-list::-webkit-scrollbar-track { background: transparent; }
+    #popup-list::-webkit-scrollbar-thumb { background: #30363d; border-radius: 3px; }
+  </style>
+</head>
+<body>
+  <div class="popup-header">
+    <h1>Routr</h1>
+    <a id="open-options">Settings</a>
+  </div>
+  <input type="text" id="popup-search" placeholder="Search shortcuts..." autofocus>
+  <div id="popup-list"></div>
+  <script src="popup.js"></script>
+</body>
+</html>
