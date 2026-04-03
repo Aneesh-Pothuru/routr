@@ -163,7 +163,8 @@ function renderShortcuts(filter = "") {
     .filter(([key, value]) => {
       if (filter) {
         const q = filter.toLowerCase();
-        if (!key.includes(q) && !value.url.toLowerCase().includes(q) && !value.description.toLowerCase().includes(q)) {
+        const aliasMatch = value.aliases && value.aliases.some(a => a.includes(q));
+        if (!key.includes(q) && !value.url.toLowerCase().includes(q) && !value.description.toLowerCase().includes(q) && !aliasMatch) {
           return false;
         }
       }
@@ -476,12 +477,16 @@ function handleSearch(e) {
 // --- Export ---
 
 function handleExport() {
-  const data = JSON.stringify(shortcuts, null, 2);
+  const exportData = { shortcuts };
+  if (Object.keys(categoryOverrides).length > 0) {
+    exportData.categoryOverrides = categoryOverrides;
+  }
+  const data = JSON.stringify(exportData, null, 2);
   const blob = new Blob([data], { type: "application/json" });
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
-  a.download = "routr-shortcuts.json";
+  a.download = `routr-shortcuts-${new Date().toISOString().slice(0, 10)}.json`;
   a.click();
   URL.revokeObjectURL(url);
   showToast("Shortcuts exported!");
@@ -496,23 +501,33 @@ function handleImport(e) {
   const reader = new FileReader();
   reader.onload = async (event) => {
     try {
-      const data = JSON.parse(event.target.result);
+      const raw = JSON.parse(event.target.result);
 
-      for (const [key, value] of Object.entries(data)) {
+      // Support both new format { shortcuts, categoryOverrides } and old flat format
+      let importedShortcuts;
+      let importedOverrides = {};
+      if (raw.shortcuts && typeof raw.shortcuts === "object" && !raw.url) {
+        importedShortcuts = raw.shortcuts;
+        importedOverrides = raw.categoryOverrides || {};
+      } else {
+        importedShortcuts = raw;
+      }
+
+      for (const [key, value] of Object.entries(importedShortcuts)) {
         if (!value.url || !value.description) {
           showToast("Invalid file: each shortcut must have 'url' and 'description'.", true);
           return;
         }
       }
 
-      const importCount = Object.keys(data).length;
+      const importCount = Object.keys(importedShortcuts).length;
       const mode = await showImportDialog(importCount);
       if (mode === "cancel") return;
 
       if (mode === "merge") {
         let added = 0;
         let skipped = 0;
-        for (const [key, value] of Object.entries(data)) {
+        for (const [key, value] of Object.entries(importedShortcuts)) {
           if (shortcuts[key]) {
             skipped++;
           } else {
@@ -520,10 +535,19 @@ function handleImport(e) {
             added++;
           }
         }
+        // Merge category overrides (don't overwrite existing)
+        for (const [key, cat] of Object.entries(importedOverrides)) {
+          if (!categoryOverrides[key]) {
+            categoryOverrides[key] = cat;
+          }
+        }
+        await saveCategoryOverrides(categoryOverrides);
         await saveShortcuts(shortcuts);
         showToast(`Merged: ${added} added, ${skipped} already existed.`);
       } else {
-        shortcuts = data;
+        shortcuts = importedShortcuts;
+        categoryOverrides = importedOverrides;
+        await saveCategoryOverrides(categoryOverrides);
         await saveShortcuts(shortcuts);
         showToast(`Replaced all shortcuts with ${importCount} from file.`);
       }

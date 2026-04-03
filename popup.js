@@ -19,7 +19,8 @@ function renderList(shortcuts, recentKeys, filter = "") {
     .filter(([key, value]) => {
       if (!filter) return true;
       const q = filter.toLowerCase();
-      return key.includes(q) || value.description.toLowerCase().includes(q) || value.url.toLowerCase().includes(q);
+      const aliasMatch = value.aliases && value.aliases.some(a => a.includes(q));
+      return key.includes(q) || value.description.toLowerCase().includes(q) || value.url.toLowerCase().includes(q) || aliasMatch;
     })
     .sort(([a], [b]) => a.localeCompare(b));
 
@@ -136,6 +137,8 @@ document.addEventListener("DOMContentLoaded", async () => {
       } else if (items.length > 0) {
         items[0].click();
       }
+    } else if (e.key === "Escape") {
+      window.close();
     }
   });
 
