@@ -55,7 +55,8 @@
       cursor: pointer;
       transition: background 0.1s;
     }
-    .popup-item:hover { background: #1c2030; }
+    .popup-item:hover, .popup-item.selected { background: #1c2030; }
+    .popup-item.selected { outline: 1px solid #58a6ff; }
     .popup-key {
       font-family: 'SF Mono', 'Fira Code', monospace;
       font-size: 12px;
@@ -82,6 +83,14 @@
       overflow: hidden;
       text-overflow: ellipsis;
       white-space: nowrap;
+    }
+    .popup-section-label {
+      padding: 6px 16px 4px;
+      font-size: 10px;
+      font-weight: 600;
+      color: #484f58;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
     }
     .popup-empty {
       text-align: center;

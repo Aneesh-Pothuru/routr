@@ -1,6 +1,7 @@
 let shortcuts = {};
 let editingKey = null;
 let activeCategory = "all";
+let selectedForDelete = new Set();
 
 // --- Category Detection ---
 
@@ -154,6 +155,7 @@ function renderShortcuts(filter = "") {
     if (editingKey === key) {
       row.classList.add("editing");
       row.innerHTML = `
+        <div></div>
         <div><input type="text" class="edit-key" value="${escapeHtml(key)}"></div>
         <div></div>
         <div><input type="url" class="edit-url" value="${escapeHtml(value.url)}"></div>
@@ -169,7 +171,9 @@ function renderShortcuts(filter = "") {
         renderShortcuts(document.getElementById("search").value);
       });
     } else {
+      const checked = selectedForDelete.has(key) ? "checked" : "";
       row.innerHTML = `
+        <div><input type="checkbox" class="shortcut-checkbox" data-key="${escapeHtml(key)}" ${checked}></div>
         <div><span class="shortcut-key">${escapeHtml(key)}/</span></div>
         <div><span class="shortcut-cat ${cat.css}">${cat.name}</span></div>
         <div class="shortcut-url"><a href="${escapeHtml(value.url)}" target="_blank">${escapeHtml(value.url.replace(/^https?:\/\//, ""))}</a></div>
@@ -179,6 +183,14 @@ function renderShortcuts(filter = "") {
           <button class="btn btn-sm btn-delete delete-btn">Delete</button>
         </div>
       `;
+      row.querySelector(".shortcut-checkbox").addEventListener("change", (e) => {
+        if (e.target.checked) {
+          selectedForDelete.add(key);
+        } else {
+          selectedForDelete.delete(key);
+        }
+        updateBulkBar();
+      });
       row.querySelector(".edit-btn").addEventListener("click", () => {
         editingKey = key;
         renderShortcuts(document.getElementById("search").value);
@@ -291,6 +303,37 @@ async function handleSaveEdit(oldKey, row) {
   showToast(`Shortcut "${newKey}/" updated!`);
 }
 
+// --- Bulk Delete ---
+
+function updateBulkBar() {
+  const bar = document.getElementById("bulk-bar");
+  const count = selectedForDelete.size;
+  if (count > 0) {
+    bar.style.display = "flex";
+    document.getElementById("bulk-count").textContent = `${count} selected`;
+  } else {
+    bar.style.display = "none";
+  }
+}
+
+async function handleBulkDelete() {
+  const count = selectedForDelete.size;
+  if (count === 0) return;
+  if (!confirm(`Delete ${count} shortcut${count > 1 ? "s" : ""}?`)) return;
+
+  for (const key of selectedForDelete) {
+    delete shortcuts[key];
+  }
+  selectedForDelete.clear();
+  await saveShortcuts(shortcuts);
+
+  updateStats();
+  renderCategoryTabs();
+  renderShortcuts(document.getElementById("search").value);
+  updateBulkBar();
+  showToast(`Deleted ${count} shortcut${count > 1 ? "s" : ""}.`);
+}
+
 // --- Search ---
 
 function handleSearch(e) {
@@ -329,18 +372,65 @@ function handleImport(e) {
         }
       }
 
-      shortcuts = data;
-      await saveShortcuts(shortcuts);
+      const importCount = Object.keys(data).length;
+      const mode = await showImportDialog(importCount);
+      if (mode === "cancel") return;
+
+      if (mode === "merge") {
+        let added = 0;
+        let skipped = 0;
+        for (const [key, value] of Object.entries(data)) {
+          if (shortcuts[key]) {
+            skipped++;
+          } else {
+            shortcuts[key] = value;
+            added++;
+          }
+        }
+        await saveShortcuts(shortcuts);
+        showToast(`Merged: ${added} added, ${skipped} already existed.`);
+      } else {
+        shortcuts = data;
+        await saveShortcuts(shortcuts);
+        showToast(`Replaced all shortcuts with ${importCount} from file.`);
+      }
+
       updateStats();
       renderCategoryTabs();
       renderShortcuts();
-      showToast(`Imported ${Object.keys(data).length} shortcuts!`);
     } catch {
       showToast("Invalid JSON file.", true);
     }
   };
   reader.readAsText(file);
   e.target.value = "";
+}
+
+function showImportDialog(count) {
+  return new Promise((resolve) => {
+    const overlay = document.createElement("div");
+    overlay.className = "import-dialog-overlay";
+    overlay.innerHTML = `
+      <div class="import-dialog">
+        <h3>Import ${count} Shortcuts</h3>
+        <p>How would you like to import?</p>
+        <div class="import-dialog-actions">
+          <button class="btn btn-add" data-mode="merge">Merge (keep existing)</button>
+          <button class="btn btn-danger" data-mode="replace">Replace All</button>
+          <button class="btn btn-secondary" data-mode="cancel">Cancel</button>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(overlay);
+
+    overlay.addEventListener("click", (e) => {
+      const btn = e.target.closest("[data-mode]");
+      if (btn) {
+        overlay.remove();
+        resolve(btn.dataset.mode);
+      }
+    });
+  });
 }
 
 // --- Reset ---
@@ -468,4 +558,10 @@ document.addEventListener("DOMContentLoaded", async () => {
     document.getElementById("import-file").click();
   });
   document.getElementById("import-file").addEventListener("change", handleImport);
+  document.getElementById("bulk-delete-btn").addEventListener("click", handleBulkDelete);
+  document.getElementById("bulk-clear-btn").addEventListener("click", () => {
+    selectedForDelete.clear();
+    updateBulkBar();
+    renderShortcuts(document.getElementById("search").value);
+  });
 });

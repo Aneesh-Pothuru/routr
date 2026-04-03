@@ -124,7 +124,13 @@
 
     <!-- Shortcuts List -->
     <section class="shortcuts-section">
+      <div id="bulk-bar" class="bulk-bar" style="display:none;">
+        <span id="bulk-count">0 selected</span>
+        <button id="bulk-delete-btn" class="btn btn-sm btn-delete">Delete Selected</button>
+        <button id="bulk-clear-btn" class="btn btn-sm btn-secondary">Clear</button>
+      </div>
       <div class="shortcuts-header">
+        <span class="col-check"></span>
         <span class="col-key">Shortcut</span>
         <span class="col-cat">Category</span>
         <span class="col-url">URL</span>

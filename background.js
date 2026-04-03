@@ -89,6 +89,19 @@ async function syncRulesToDNR() {
   });
 }
 
+// --- Recently Used Tracking ---
+
+async function trackRecentUsage(key) {
+  const { recentlyUsed } = await chrome.storage.local.get("recentlyUsed");
+  let recent = recentlyUsed || [];
+  // Remove if already present, then prepend
+  recent = recent.filter(k => k !== key);
+  recent.unshift(key);
+  // Keep only last 5
+  recent = recent.slice(0, 5);
+  await chrome.storage.local.set({ recentlyUsed: recent });
+}
+
 // --- Install ---
 
 chrome.runtime.onInstalled.addListener(async () => {
@@ -117,6 +130,22 @@ chrome.webNavigation.onErrorOccurred.addListener(async (details) => {
   const shortcuts = await getShortcuts();
   if (shortcuts[hostname]) {
     chrome.tabs.update(details.tabId, { url: shortcuts[hostname].url });
+    trackRecentUsage(hostname);
+  }
+});
+
+// --- Track DNR redirects via onBeforeNavigate ---
+// DNR fires before this, so if we see a navigation to a shortcut's target URL, log it.
+
+chrome.webNavigation.onCommitted.addListener(async (details) => {
+  if (details.frameId !== 0 || details.transitionType !== "typed") return;
+  // Check if the committed URL matches any shortcut target
+  const shortcuts = await getShortcuts();
+  for (const [key, value] of Object.entries(shortcuts)) {
+    if (details.url === value.url || details.url.startsWith(value.url)) {
+      trackRecentUsage(key);
+      break;
+    }
   }
 });
 
