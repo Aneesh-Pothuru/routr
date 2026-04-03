@@ -109,9 +109,14 @@
             <label for="shortcut-desc">Description</label>
             <input type="text" id="shortcut-desc" placeholder="e.g., Google Calendar" required>
           </div>
+          <div class="form-group form-group-key">
+            <label for="shortcut-aliases">Aliases</label>
+            <input type="text" id="shortcut-aliases" placeholder="e.g., cal, calendar">
+          </div>
           <button type="submit" class="btn btn-add">Add</button>
         </div>
       </form>
+      <p class="form-help">Use <code>{param}</code> in URLs for dynamic routing. Example: <code>https://github.com/{repo}</code> lets you type <code>gh/routr</code> to go directly to a repo. Add aliases so multiple keys point to the same URL.</p>
     </section>
 
     <!-- Category Filters + Search -->
@@ -135,6 +140,7 @@
         <span class="col-cat">Category</span>
         <span class="col-url">URL</span>
         <span class="col-desc">Description</span>
+        <span class="col-aliases">Aliases</span>
         <span class="col-actions">Actions</span>
       </div>
       <div id="shortcuts-list"></div>

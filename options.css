@@ -417,7 +417,7 @@ input:focus {
 
 .shortcuts-header {
   display: grid;
-  grid-template-columns: 28px 90px 90px 1fr 1fr 120px;
+  grid-template-columns: 28px 120px 90px 1fr 1fr 100px 120px;
   gap: 12px;
   padding: 8px 12px;
   font-size: 12px;
@@ -431,7 +431,7 @@ input:focus {
 
 .shortcut-row {
   display: grid;
-  grid-template-columns: 28px 90px 90px 1fr 1fr 120px;
+  grid-template-columns: 28px 120px 90px 1fr 1fr 100px 120px;
   gap: 12px;
   padding: 12px;
   border-radius: 8px;
@@ -572,13 +572,87 @@ input:focus {
 
   .shortcuts-header { display: none; }
   .shortcut-row {
-    grid-template-columns: 28px 1fr;
+    grid-template-columns: 1fr;
     gap: 6px;
     border-bottom: 1px solid #30363d;
     border-radius: 0;
     padding: 16px 12px;
   }
   .shortcut-actions { justify-content: flex-start; }
+}
+
+/* ─── Form Help ─── */
+
+.form-help {
+  margin-top: 12px;
+  font-size: 12px;
+  color: #484f58;
+  line-height: 1.6;
+}
+
+/* ─── Template Badge ─── */
+
+.template-badge {
+  font-family: 'SF Mono', 'Fira Code', monospace;
+  font-size: 10px;
+  color: #a371f7;
+  background: #2a1f3f;
+  padding: 2px 6px;
+  border-radius: 4px;
+  margin-left: 4px;
+}
+
+/* ─── Broken Link Badge ─── */
+
+.broken-badge {
+  color: #d29922;
+  font-size: 14px;
+  margin-left: 4px;
+  cursor: help;
+}
+
+/* ─── Alias List ─── */
+
+.alias-list {
+  display: block;
+  font-size: 11px;
+  color: #484f58;
+  margin-top: 2px;
+}
+
+/* ─── Editable Category ─── */
+
+.editable-cat {
+  cursor: pointer;
+  transition: opacity 0.15s;
+}
+
+.editable-cat:hover {
+  opacity: 0.8;
+  text-decoration: underline;
+}
+
+/* ─── Category Picker ─── */
+
+.category-picker {
+  background: #161b22;
+  border: 1px solid #30363d;
+  border-radius: 8px;
+  padding: 6px;
+  z-index: 150;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+  min-width: 120px;
+}
+
+.category-picker-option {
+  padding: 6px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background 0.1s;
+}
+
+.category-picker-option:hover {
+  background: #1c2030;
 }
 
 /* ─── Import Dialog ─── */

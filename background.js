@@ -3,7 +3,7 @@ const DEFAULT_SHORTCUTS = {
   "c": { url: "https://calendar.google.com", description: "Google Calendar" },
   "m": { url: "https://mail.google.com", description: "Gmail" },
   "d": { url: "https://drive.google.com", description: "Google Drive" },
-  "gh": { url: "https://github.com", description: "GitHub" },
+  "gh": { url: "https://github.com/{repo}", description: "GitHub (or gh/repo for direct access)" },
   "yt": { url: "https://youtube.com", description: "YouTube" },
   "gpt": { url: "https://chat.openai.com", description: "ChatGPT" },
   "cl": { url: "https://claude.ai", description: "Claude" },
@@ -32,9 +32,10 @@ const DEFAULT_SHORTCUTS = {
   "bilt": { url: "https://www.biltrewards.com/", description: "Bilt Rewards (Rent)" },
   "dd": { url: "https://www.doordash.com/", description: "DoorDash" },
   "luma": { url: "https://lu.ma/", description: "Luma Events" },
-  "az": { url: "https://www.amazon.com/", description: "Amazon" },
+  "az": { url: "https://www.amazon.com/s?k={query}", description: "Amazon (or az/search term)" },
   "att": { url: "https://www.att.com/my/", description: "AT&T My Account" },
-  "cos": { url: "https://www.costco.com/", description: "Costco" }
+  "cos": { url: "https://www.costco.com/", description: "Costco" },
+  "gm": { url: "https://mail.google.com/mail/u/0/#search/{query}", description: "Gmail Search (gm/search term)" }
 };
 
 // --- Storage ---
@@ -42,6 +43,21 @@ const DEFAULT_SHORTCUTS = {
 async function getShortcuts() {
   const { shortcuts } = await chrome.storage.sync.get("shortcuts");
   return shortcuts || DEFAULT_SHORTCUTS;
+}
+
+// --- URL Template Helpers ---
+
+function isTemplateUrl(url) {
+  return /\{[^}]+\}/.test(url);
+}
+
+function getBaseUrl(url) {
+  // Strip template parameters from URL: "https://github.com/{repo}" → "https://github.com"
+  return url.replace(/\/?\{[^}]+\}.*$/, "");
+}
+
+function escapeRegex(str) {
+  return str.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 // --- DNR Rule Sync ---
@@ -55,27 +71,70 @@ async function syncRulesToDNR() {
   const existingRules = await chrome.declarativeNetRequest.getDynamicRules();
   const removeIds = existingRules.map(r => r.id);
 
-  // Build new rules — one per shortcut
+  // Build new rules
   const addRules = [];
   let id = 1;
 
   for (const [key, value] of Object.entries(shortcuts)) {
-    // Rule for http://<key>/ and http://<key>
-    addRules.push({
-      id: id++,
-      priority: 1,
-      action: { type: "redirect", redirect: { url: value.url } },
-      condition: {
-        urlFilter: `||${key}/`,
-        resourceTypes: ["main_frame"]
+    // Collect all keys (primary + aliases)
+    const allKeys = [key];
+    if (value.aliases && Array.isArray(value.aliases)) {
+      allKeys.push(...value.aliases);
+    }
+
+    for (const k of allKeys) {
+      if (isTemplateUrl(value.url)) {
+        // Template shortcut: use regexFilter to capture path after key
+        // e.g. gh/{repo} → regex captures everything after "gh/"
+        // Rule 1: with parameter — gh/something → redirect with substitution
+        const templateUrl = value.url;
+        // Build regexSubstitution: replace {param} with \1
+        const regexSub = templateUrl.replace(/\{[^}]+\}/, "\\1");
+        addRules.push({
+          id: id++,
+          priority: 2,
+          action: {
+            type: "redirect",
+            redirect: { regexSubstitution: regexSub }
+          },
+          condition: {
+            regexFilter: `^https?://${escapeRegex(k)}/(.+)$`,
+            resourceTypes: ["main_frame"]
+          }
+        });
+
+        // Rule 2: without parameter — just "gh/" → go to base URL (lower priority)
+        const baseUrl = getBaseUrl(value.url);
+        if (baseUrl) {
+          addRules.push({
+            id: id++,
+            priority: 1,
+            action: { type: "redirect", redirect: { url: baseUrl } },
+            condition: {
+              urlFilter: `||${k}/`,
+              resourceTypes: ["main_frame"]
+            }
+          });
+        }
+      } else {
+        // Static shortcut: simple urlFilter redirect
+        addRules.push({
+          id: id++,
+          priority: 1,
+          action: { type: "redirect", redirect: { url: value.url } },
+          condition: {
+            urlFilter: `||${k}/`,
+            resourceTypes: ["main_frame"]
+          }
+        });
       }
-    });
+    }
   }
 
   // Add rule for r/ → extension options page
   addRules.push({
     id: id++,
-    priority: 2,
+    priority: 3,
     action: { type: "redirect", redirect: { extensionPath: "/options.html" } },
     condition: {
       urlFilter: "||r/",
@@ -128,9 +187,36 @@ chrome.webNavigation.onErrorOccurred.addListener(async (details) => {
   if (hostname.includes(".")) return;
 
   const shortcuts = await getShortcuts();
-  if (shortcuts[hostname]) {
-    chrome.tabs.update(details.tabId, { url: shortcuts[hostname].url });
-    trackRecentUsage(hostname);
+  const pathAfterSlash = url.pathname.replace(/^\/+/, "");
+
+  // Find matching shortcut (check primary key + aliases)
+  let matchKey = null;
+  let matchValue = null;
+  for (const [key, value] of Object.entries(shortcuts)) {
+    if (key === hostname) {
+      matchKey = key;
+      matchValue = value;
+      break;
+    }
+    if (value.aliases && value.aliases.includes(hostname)) {
+      matchKey = key;
+      matchValue = value;
+      break;
+    }
+  }
+
+  if (matchValue) {
+    let targetUrl;
+    if (pathAfterSlash && isTemplateUrl(matchValue.url)) {
+      // Replace template parameter with the path
+      targetUrl = matchValue.url.replace(/\{[^}]+\}/, pathAfterSlash);
+    } else if (isTemplateUrl(matchValue.url)) {
+      targetUrl = getBaseUrl(matchValue.url);
+    } else {
+      targetUrl = matchValue.url;
+    }
+    chrome.tabs.update(details.tabId, { url: targetUrl });
+    trackRecentUsage(matchKey);
   }
 });
 
@@ -149,6 +235,30 @@ chrome.webNavigation.onCommitted.addListener(async (details) => {
   }
 });
 
+// --- Broken Link Detection ---
+// Runs on service worker startup, checks each shortcut URL in the background.
+
+async function checkBrokenLinks() {
+  const shortcuts = await getShortcuts();
+  const broken = [];
+
+  for (const [key, value] of Object.entries(shortcuts)) {
+    const checkUrl = isTemplateUrl(value.url) ? getBaseUrl(value.url) : value.url;
+    if (!checkUrl) continue;
+    try {
+      const resp = await fetch(checkUrl, { method: "HEAD", mode: "no-cors" });
+      // no-cors returns opaque responses (status 0), so we can only catch network errors
+    } catch {
+      broken.push(key);
+    }
+  }
+
+  await chrome.storage.local.set({ brokenLinks: broken, brokenLinksCheckedAt: Date.now() });
+}
+
+// Run broken link check on startup, but don't block anything
+checkBrokenLinks();
+
 // --- Message handler ---
 
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
@@ -158,6 +268,14 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   }
   if (msg.type === "getDefaults") {
     sendResponse(DEFAULT_SHORTCUTS);
+    return true;
+  }
+  if (msg.type === "getBrokenLinks") {
+    chrome.storage.local.get(["brokenLinks", "brokenLinksCheckedAt"]).then(sendResponse);
+    return true;
+  }
+  if (msg.type === "recheckBrokenLinks") {
+    checkBrokenLinks().then(() => sendResponse({ ok: true }));
     return true;
   }
 });

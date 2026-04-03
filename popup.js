@@ -59,17 +59,29 @@ function renderList(shortcuts, recentKeys, filter = "") {
   }
 }
 
+function isTemplateUrl(url) {
+  return /\{[^}]+\}/.test(url);
+}
+
+function getBaseUrl(url) {
+  return url.replace(/\/?\{[^}]+\}.*$/, "");
+}
+
 function createItem(key, value) {
   const item = document.createElement("div");
   item.className = "popup-item";
   item.title = value.url;
+  const displayUrl = value.url.replace(/^https?:\/\//, "");
+  const hasTemplate = isTemplateUrl(value.url);
+  const templateHint = hasTemplate ? '<span class="popup-template">{..}</span>' : "";
+  const navigateUrl = hasTemplate ? getBaseUrl(value.url) : value.url;
   item.innerHTML = `
-    <span class="popup-key">${escapeHtml(key)}/</span>
+    <span class="popup-key">${escapeHtml(key)}/${templateHint}</span>
     <span class="popup-desc">${escapeHtml(value.description)}</span>
-    <span class="popup-url">${escapeHtml(value.url.replace(/^https?:\/\//, ""))}</span>
+    <span class="popup-url">${escapeHtml(displayUrl)}</span>
   `;
   item.addEventListener("click", () => {
-    chrome.tabs.update({ url: value.url });
+    chrome.tabs.update({ url: navigateUrl });
     window.close();
   });
   return item;

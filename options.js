@@ -2,6 +2,8 @@ let shortcuts = {};
 let editingKey = null;
 let activeCategory = "all";
 let selectedForDelete = new Set();
+let categoryOverrides = {};
+let brokenLinks = [];
 
 // --- Category Detection ---
 
@@ -18,7 +20,20 @@ const CATEGORY_MAP = [
   { pattern: /notion\.so/, category: "Other", css: "cat-other" }
 ];
 
-function getCategoryForUrl(url) {
+const ALL_CATEGORY_NAMES = ["Work", "Finance", "Dev", "Health", "AI", "Google", "Shopping", "Social", "Other"];
+
+const CATEGORY_CSS = {
+  "Work": "cat-work", "Finance": "cat-finance", "Dev": "cat-dev",
+  "Health": "cat-health", "AI": "cat-ai", "Google": "cat-google",
+  "Shopping": "cat-shopping", "Social": "cat-social", "Other": "cat-other"
+};
+
+function getCategoryForUrl(url, key) {
+  // Check manual override first
+  if (key && categoryOverrides[key]) {
+    const name = categoryOverrides[key];
+    return { name, css: CATEGORY_CSS[name] || "cat-other" };
+  }
   for (const entry of CATEGORY_MAP) {
     if (entry.pattern.test(url)) {
       return { name: entry.category, css: entry.css };
@@ -29,10 +44,20 @@ function getCategoryForUrl(url) {
 
 function getAllCategories() {
   const cats = new Set();
-  for (const value of Object.values(shortcuts)) {
-    cats.add(getCategoryForUrl(value.url).name);
+  for (const [key, value] of Object.entries(shortcuts)) {
+    cats.add(getCategoryForUrl(value.url, key).name);
   }
   return [...cats].sort();
+}
+
+// --- Template URL Helpers ---
+
+function isTemplateUrl(url) {
+  return /\{[^}]+\}/.test(url);
+}
+
+function getBaseUrl(url) {
+  return url.replace(/\/?\{[^}]+\}.*$/, "");
 }
 
 // --- Storage ---
@@ -42,10 +67,19 @@ async function loadShortcuts() {
   return shortcuts || {};
 }
 
+async function loadCategoryOverrides() {
+  const { categoryOverrides } = await chrome.storage.sync.get("categoryOverrides");
+  return categoryOverrides || {};
+}
+
+async function saveCategoryOverrides(data) {
+  await chrome.storage.sync.set({ categoryOverrides: data });
+  categoryOverrides = data;
+}
+
 async function saveShortcuts(data) {
   await chrome.storage.sync.set({ shortcuts: data });
   shortcuts = data;
-  // Sync DNR redirect rules
   chrome.runtime.sendMessage({ type: "updateRules" });
 }
 
@@ -66,8 +100,10 @@ function validateKey(key) {
 }
 
 function validateUrl(url) {
+  // Allow template URLs with {param} — temporarily strip them for validation
+  const cleanUrl = url.replace(/\{[^}]+\}/g, "placeholder");
   try {
-    const parsed = new URL(url);
+    const parsed = new URL(cleanUrl);
     return parsed.protocol === "http:" || parsed.protocol === "https:";
   } catch {
     return false;
@@ -96,7 +132,6 @@ function renderCategoryTabs() {
     container.appendChild(btn);
   }
 
-  // Restore active state
   if (activeCategory !== "all") {
     const allBtn = container.querySelector('[data-category="all"]');
     allBtn.classList.remove("active");
@@ -126,16 +161,14 @@ function renderShortcuts(filter = "") {
 
   const entries = Object.entries(shortcuts)
     .filter(([key, value]) => {
-      // Text filter
       if (filter) {
         const q = filter.toLowerCase();
         if (!key.includes(q) && !value.url.toLowerCase().includes(q) && !value.description.toLowerCase().includes(q)) {
           return false;
         }
       }
-      // Category filter
       if (activeCategory !== "all") {
-        const cat = getCategoryForUrl(value.url);
+        const cat = getCategoryForUrl(value.url, key);
         if (cat.name !== activeCategory) return false;
       }
       return true;
@@ -148,18 +181,22 @@ function renderShortcuts(filter = "") {
   }
 
   for (const [key, value] of entries) {
-    const cat = getCategoryForUrl(value.url);
+    const cat = getCategoryForUrl(value.url, key);
+    const isBroken = brokenLinks.includes(key);
+    const hasTemplate = isTemplateUrl(value.url);
     const row = document.createElement("div");
     row.className = "shortcut-row";
 
     if (editingKey === key) {
       row.classList.add("editing");
+      const aliasStr = (value.aliases || []).join(", ");
       row.innerHTML = `
         <div></div>
         <div><input type="text" class="edit-key" value="${escapeHtml(key)}"></div>
         <div></div>
-        <div><input type="url" class="edit-url" value="${escapeHtml(value.url)}"></div>
+        <div><input type="url" class="edit-url" value="${escapeHtml(value.url)}" placeholder="URL (use {param} for templates)"></div>
         <div><input type="text" class="edit-desc" value="${escapeHtml(value.description)}"></div>
+        <div><input type="text" class="edit-aliases" value="${escapeHtml(aliasStr)}" placeholder="Aliases (comma-separated)"></div>
         <div class="shortcut-actions">
           <button class="btn btn-sm btn-add save-btn">Save</button>
           <button class="btn btn-sm btn-secondary cancel-btn">Cancel</button>
@@ -172,12 +209,23 @@ function renderShortcuts(filter = "") {
       });
     } else {
       const checked = selectedForDelete.has(key) ? "checked" : "";
+      const brokenIcon = isBroken ? '<span class="broken-badge" title="May be unreachable">&#9888;</span>' : "";
+      const templateBadge = hasTemplate ? '<span class="template-badge" title="Parameterized URL">{..}</span>' : "";
+      const aliasDisplay = (value.aliases && value.aliases.length > 0)
+        ? value.aliases.map(a => escapeHtml(a) + "/").join(", ")
+        : "";
+
       row.innerHTML = `
         <div><input type="checkbox" class="shortcut-checkbox" data-key="${escapeHtml(key)}" ${checked}></div>
-        <div><span class="shortcut-key">${escapeHtml(key)}/</span></div>
-        <div><span class="shortcut-cat ${cat.css}">${cat.name}</span></div>
-        <div class="shortcut-url"><a href="${escapeHtml(value.url)}" target="_blank">${escapeHtml(value.url.replace(/^https?:\/\//, ""))}</a></div>
+        <div>
+          <span class="shortcut-key">${escapeHtml(key)}/</span>
+          ${templateBadge}
+          ${brokenIcon}
+        </div>
+        <div><span class="shortcut-cat ${cat.css} editable-cat" data-key="${escapeHtml(key)}" title="Click to change category">${cat.name}</span></div>
+        <div class="shortcut-url"><a href="${escapeHtml(getBaseUrl(value.url) || value.url)}" target="_blank">${escapeHtml(value.url.replace(/^https?:\/\//, ""))}</a></div>
         <div class="shortcut-desc">${escapeHtml(value.description)}</div>
+        <div class="alias-list">${aliasDisplay}</div>
         <div class="shortcut-actions">
           <button class="btn btn-sm btn-edit edit-btn">Edit</button>
           <button class="btn btn-sm btn-delete delete-btn">Delete</button>
@@ -191,6 +239,9 @@ function renderShortcuts(filter = "") {
         }
         updateBulkBar();
       });
+      row.querySelector(".editable-cat").addEventListener("click", (e) => {
+        showCategoryPicker(e.target, key);
+      });
       row.querySelector(".edit-btn").addEventListener("click", () => {
         editingKey = key;
         renderShortcuts(document.getElementById("search").value);
@@ -200,6 +251,49 @@ function renderShortcuts(filter = "") {
 
     list.appendChild(row);
   }
+}
+
+// --- Category Picker ---
+
+function showCategoryPicker(anchor, key) {
+  // Remove existing picker if any
+  const existing = document.querySelector(".category-picker");
+  if (existing) existing.remove();
+
+  const picker = document.createElement("div");
+  picker.className = "category-picker";
+
+  for (const cat of ALL_CATEGORY_NAMES) {
+    const opt = document.createElement("div");
+    opt.className = "category-picker-option";
+    const css = CATEGORY_CSS[cat] || "cat-other";
+    opt.innerHTML = `<span class="shortcut-cat ${css}">${cat}</span>`;
+    opt.addEventListener("click", async () => {
+      categoryOverrides[key] = cat;
+      await saveCategoryOverrides(categoryOverrides);
+      picker.remove();
+      renderCategoryTabs();
+      renderShortcuts(document.getElementById("search").value);
+      showToast(`Category for "${key}/" changed to ${cat}.`);
+    });
+    picker.appendChild(opt);
+  }
+
+  // Position near the anchor
+  const rect = anchor.getBoundingClientRect();
+  picker.style.position = "fixed";
+  picker.style.top = (rect.bottom + 4) + "px";
+  picker.style.left = rect.left + "px";
+  document.body.appendChild(picker);
+
+  // Close on outside click
+  const closeHandler = (e) => {
+    if (!picker.contains(e.target) && e.target !== anchor) {
+      picker.remove();
+      document.removeEventListener("click", closeHandler);
+    }
+  };
+  setTimeout(() => document.addEventListener("click", closeHandler), 0);
 }
 
 function escapeHtml(str) {
@@ -216,10 +310,12 @@ async function handleAdd(e) {
   const keyInput = document.getElementById("shortcut-key");
   const urlInput = document.getElementById("shortcut-url");
   const descInput = document.getElementById("shortcut-desc");
+  const aliasInput = document.getElementById("shortcut-aliases");
 
   const key = keyInput.value.trim().toLowerCase().replace(/\/+$/, "");
   const url = urlInput.value.trim();
   const desc = descInput.value.trim();
+  const aliasStr = aliasInput ? aliasInput.value.trim() : "";
 
   if (!validateKey(key)) {
     showToast("Shortcut must be lowercase letters, numbers, hyphens, or underscores.", true);
@@ -240,12 +336,23 @@ async function handleAdd(e) {
     return;
   }
 
-  shortcuts[key] = { url, description: desc };
+  const entry = { url, description: desc };
+
+  // Parse aliases
+  if (aliasStr) {
+    const aliases = aliasStr.split(",").map(a => a.trim().toLowerCase().replace(/\/+$/, "")).filter(a => a && validateKey(a) && a !== key);
+    if (aliases.length > 0) {
+      entry.aliases = aliases;
+    }
+  }
+
+  shortcuts[key] = entry;
   await saveShortcuts(shortcuts);
 
   keyInput.value = "";
   urlInput.value = "";
   descInput.value = "";
+  if (aliasInput) aliasInput.value = "";
 
   updateStats();
   renderCategoryTabs();
@@ -257,6 +364,11 @@ async function handleDelete(key) {
   if (!confirm(`Delete shortcut "${key}/"?`)) return;
 
   delete shortcuts[key];
+  // Also clean up category override
+  if (categoryOverrides[key]) {
+    delete categoryOverrides[key];
+    await saveCategoryOverrides(categoryOverrides);
+  }
   await saveShortcuts(shortcuts);
 
   updateStats();
@@ -269,6 +381,7 @@ async function handleSaveEdit(oldKey, row) {
   const newKey = row.querySelector(".edit-key").value.trim().toLowerCase().replace(/\/+$/, "");
   const newUrl = row.querySelector(".edit-url").value.trim();
   const newDesc = row.querySelector(".edit-desc").value.trim();
+  const aliasStr = row.querySelector(".edit-aliases") ? row.querySelector(".edit-aliases").value.trim() : "";
 
   if (!validateKey(newKey)) {
     showToast("Shortcut must be lowercase letters, numbers, hyphens, or underscores.", true);
@@ -291,9 +404,25 @@ async function handleSaveEdit(oldKey, row) {
 
   if (newKey !== oldKey) {
     delete shortcuts[oldKey];
+    // Move category override
+    if (categoryOverrides[oldKey]) {
+      categoryOverrides[newKey] = categoryOverrides[oldKey];
+      delete categoryOverrides[oldKey];
+      await saveCategoryOverrides(categoryOverrides);
+    }
   }
 
-  shortcuts[newKey] = { url: newUrl, description: newDesc };
+  const entry = { url: newUrl, description: newDesc };
+
+  // Parse aliases
+  if (aliasStr) {
+    const aliases = aliasStr.split(",").map(a => a.trim().toLowerCase().replace(/\/+$/, "")).filter(a => a && validateKey(a) && a !== newKey);
+    if (aliases.length > 0) {
+      entry.aliases = aliases;
+    }
+  }
+
+  shortcuts[newKey] = entry;
   await saveShortcuts(shortcuts);
 
   editingKey = null;
@@ -323,8 +452,12 @@ async function handleBulkDelete() {
 
   for (const key of selectedForDelete) {
     delete shortcuts[key];
+    if (categoryOverrides[key]) {
+      delete categoryOverrides[key];
+    }
   }
   selectedForDelete.clear();
+  await saveCategoryOverrides(categoryOverrides);
   await saveShortcuts(shortcuts);
 
   updateStats();
@@ -442,44 +575,11 @@ async function handleReset() {
     const defaults = await chrome.runtime.sendMessage({ type: "getDefaults" });
     shortcuts = defaults;
   } catch {
-    shortcuts = {
-      "c": { url: "https://calendar.google.com", description: "Google Calendar" },
-      "m": { url: "https://mail.google.com", description: "Gmail" },
-      "d": { url: "https://drive.google.com", description: "Google Drive" },
-      "gh": { url: "https://github.com", description: "GitHub" },
-      "yt": { url: "https://youtube.com", description: "YouTube" },
-      "gpt": { url: "https://chat.openai.com", description: "ChatGPT" },
-      "cl": { url: "https://claude.ai", description: "Claude" },
-      "docs": { url: "https://docs.google.com", description: "Google Docs" },
-      "li": { url: "https://linkedin.com", description: "LinkedIn" },
-      "n": { url: "https://notion.so", description: "Notion" },
-      "ow": { url: "https://outlook.office.com/mail/", description: "Waymo Work Email (Outlook)" },
-      "rm": { url: "https://app.rocketmoney.com/", description: "Rocket Money Dashboard" },
-      "oura": { url: "https://cloud.ouraring.com/", description: "Oura Ring Dashboard" },
-      "hi": { url: "https://www.hellointerview.com/", description: "Hello Interview Prep" },
-      "hsa": { url: "https://my.healthequity.com/", description: "HealthEquity HSA Portal" },
-      "vg": { url: "https://investor.vanguard.com/investment-products/mutual-funds/profile/vffsx", description: "Vanguard VFFSX Fund" },
-      "nc": { url: "https://neetcode.io/", description: "NeetCode Practice" },
-      "mc": { url: "https://ucsfmychart.ucsfmedicalcenter.org/", description: "UCSF MyChart Medical Portal" },
-      "gcp": { url: "https://console.cloud.google.com/", description: "Google Cloud Console" },
-      "ms": { url: "https://waymo.solium.com/", description: "Morgan Stanley at Work (Waymo Equity)" },
-      "rh": { url: "https://robinhood.com/", description: "Robinhood Trading" },
-      "fi": { url: "https://fundresearch.fidelity.com/", description: "Fidelity Fund Research" },
-      "cap": { url: "https://myaccounts.capitalone.com/", description: "Capital One (Venture X)" },
-      "ch": { url: "https://secure.chase.com/", description: "Chase Banking" },
-      "gem": { url: "https://gemini.google.com/", description: "Google Gemini AI" },
-      "ex": { url: "https://app.excalidraw.com/", description: "Excalidraw Whiteboard" },
-      "do": { url: "https://cloud.digitalocean.com/", description: "DigitalOcean Cloud" },
-      "merc": { url: "https://app.mercury.com/", description: "Mercury (Bench AI Banking)" },
-      "bilt": { url: "https://www.biltrewards.com/", description: "Bilt Rewards (Rent)" },
-      "dd": { url: "https://www.doordash.com/", description: "DoorDash" },
-      "luma": { url: "https://lu.ma/", description: "Luma Events" },
-      "az": { url: "https://www.amazon.com/", description: "Amazon" },
-      "att": { url: "https://www.att.com/my/", description: "AT&T My Account" },
-      "cos": { url: "https://www.costco.com/", description: "Costco" }
-    };
+    shortcuts = {};
   }
 
+  categoryOverrides = {};
+  await saveCategoryOverrides(categoryOverrides);
   await saveShortcuts(shortcuts);
   updateStats();
   renderCategoryTabs();
@@ -498,16 +598,43 @@ function checkQueryParams() {
   }
 }
 
-// --- Demo animation ---
+// --- Demo animation (dynamic — uses actual shortcuts) ---
 
 function startDemoAnimation() {
   const el = document.getElementById("demo-text");
-  const demos = [
-    { text: "c/", result: "calendar.google.com" },
-    { text: "gh/", result: "github.com" },
-    { text: "cl/", result: "claude.ai" },
-    { text: "ow/", result: "outlook.office.com" }
-  ];
+
+  // Pick 4 shortcuts to demo — prefer ones with short keys
+  const entries = Object.entries(shortcuts);
+  const demos = [];
+
+  // Try to pick interesting ones: templates first, then short keys
+  const templates = entries.filter(([, v]) => isTemplateUrl(v.url));
+  const statics = entries.filter(([, v]) => !isTemplateUrl(v.url)).sort(([a], [b]) => a.length - b.length);
+
+  // Add a template example if we have one
+  if (templates.length > 0) {
+    const [key, value] = templates[0];
+    const baseHost = getBaseUrl(value.url).replace(/^https?:\/\//, "").replace(/\/$/, "");
+    demos.push({ text: key + "/example", result: baseHost + "/example" });
+  }
+
+  // Fill remaining with short static shortcuts
+  for (const [key, value] of statics) {
+    if (demos.length >= 4) break;
+    const host = value.url.replace(/^https?:\/\//, "").replace(/\/$/, "");
+    demos.push({ text: key + "/", result: host });
+  }
+
+  // Fallback if no shortcuts
+  if (demos.length === 0) {
+    demos.push(
+      { text: "c/", result: "calendar.google.com" },
+      { text: "gh/", result: "github.com" },
+      { text: "cl/", result: "claude.ai" },
+      { text: "ow/", result: "outlook.office.com" }
+    );
+  }
+
   let demoIdx = 0;
 
   function animateDemo() {
@@ -517,16 +644,13 @@ function startDemoAnimation() {
     let charIdx = 0;
     el.textContent = "";
 
-    // Type the shortcut
     const typeInterval = setInterval(() => {
       charIdx++;
       el.textContent = demo.text.substring(0, charIdx);
       if (charIdx >= demo.text.length) {
         clearInterval(typeInterval);
-        // Pause, then show result
         setTimeout(() => {
-          el.innerHTML = `<span style="color: #8b949e">${demo.result}</span>`;
-          // Pause, then clear for next
+          el.innerHTML = `<span style="color: #8b949e">${escapeHtml(demo.result)}</span>`;
           setTimeout(() => {
             el.textContent = "";
             setTimeout(animateDemo, 600);
@@ -539,10 +663,23 @@ function startDemoAnimation() {
   setTimeout(animateDemo, 800);
 }
 
+// --- Broken Links UI ---
+
+async function loadBrokenLinks() {
+  try {
+    const result = await chrome.runtime.sendMessage({ type: "getBrokenLinks" });
+    brokenLinks = result.brokenLinks || [];
+  } catch {
+    brokenLinks = [];
+  }
+}
+
 // --- Init ---
 
 document.addEventListener("DOMContentLoaded", async () => {
   shortcuts = await loadShortcuts();
+  categoryOverrides = await loadCategoryOverrides();
+  await loadBrokenLinks();
 
   updateStats();
   renderCategoryTabs();
