@@ -1045,13 +1045,13 @@ document.addEventListener("DOMContentLoaded", async () => {
     renderShortcuts(document.getElementById("search").value);
   });
 
-  // Analytics toggle
-  const analyticsToggle = document.getElementById("analytics-toggle");
-  if (analyticsToggle) {
-    analyticsToggle.addEventListener("click", () => {
-      const content = document.getElementById("analytics-content");
-      content.classList.toggle("collapsed");
-      analyticsToggle.textContent = content.classList.contains("collapsed") ? "Show" : "Hide";
-    });
-  }
+  // Tab switching
+  document.getElementById("options-tabs").addEventListener("click", (e) => {
+    const tab = e.target.closest(".options-tab");
+    if (!tab) return;
+    document.querySelectorAll(".options-tab").forEach(t => t.classList.remove("active"));
+    document.querySelectorAll(".tab-panel").forEach(p => p.classList.remove("active"));
+    tab.classList.add("active");
+    document.getElementById(tab.dataset.tab).classList.add("active");
+  });
 });

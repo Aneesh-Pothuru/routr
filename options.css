@@ -518,6 +518,56 @@ input:focus {
   width: 100%;
 }
 
+/* ─── Options Tabs ─── */
+
+.options-tabs {
+  display: flex;
+  gap: 4px;
+  margin-top: 40px;
+  margin-bottom: 24px;
+  border-bottom: 1px solid #30363d;
+  padding-bottom: 0;
+}
+
+.options-tab {
+  padding: 10px 20px;
+  background: transparent;
+  border: none;
+  border-bottom: 2px solid transparent;
+  color: #8b949e;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.options-tab:hover {
+  color: #e1e4e8;
+}
+
+.options-tab.active {
+  color: #58a6ff;
+  border-bottom-color: #58a6ff;
+}
+
+.tab-panel { display: none; }
+.tab-panel.active { display: block; }
+
+/* ─── Settings Panel ─── */
+
+.settings-panel {
+  background: #161b22;
+  border: 1px solid #30363d;
+  border-radius: 12px;
+  padding: 24px;
+  margin-bottom: 24px;
+}
+
+.actions-row {
+  display: flex;
+  gap: 12px;
+}
+
 /* ─── Section Headers ─── */
 
 .section-header {
@@ -789,6 +839,8 @@ input:focus {
   gap: 12px;
   padding-bottom: 60px;
 }
+
+.tab-panel { padding-bottom: 60px; }
 
 /* ─── Toast ─── */
 

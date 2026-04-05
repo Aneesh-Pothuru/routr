@@ -117,6 +117,20 @@
     #popup-list::-webkit-scrollbar { width: 6px; }
     #popup-list::-webkit-scrollbar-track { background: transparent; }
     #popup-list::-webkit-scrollbar-thumb { background: #30363d; border-radius: 3px; }
+    .close-dupes-btn {
+      width: calc(100% - 24px);
+      margin: 8px 12px;
+      padding: 8px;
+      background: #1c2030;
+      border: 1px solid #f85149;
+      border-radius: 8px;
+      color: #f85149;
+      font-size: 12px;
+      font-weight: 500;
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+    .close-dupes-btn:hover { background: #f8514922; }
   </style>
 </head>
 <body>
@@ -126,6 +140,7 @@
   </div>
   <input type="text" id="popup-search" placeholder="Search shortcuts..." autofocus>
   <div id="popup-list"></div>
+  <button id="close-dupes" class="close-dupes-btn" style="display:none;">Close duplicates</button>
   <script src="popup.js"></script>
 </body>
 </html>

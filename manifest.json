@@ -30,5 +30,8 @@
       },
       "description": "Open Routr popup"
     }
+  },
+  "chrome_url_overrides": {
+    "newtab": "newtab.html"
   }
 }

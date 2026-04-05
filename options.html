@@ -89,52 +89,26 @@
   <!-- Main Content -->
   <div class="container">
 
-    <!-- Analytics Dashboard -->
-    <section class="analytics-section" id="analytics-section">
-      <div class="section-header">
-        <h2>Usage Analytics</h2>
-        <button id="analytics-toggle" class="btn btn-sm btn-secondary">Hide</button>
-      </div>
-      <div id="analytics-content"></div>
-    </section>
+    <!-- Tab Navigation -->
+    <div class="options-tabs" id="options-tabs">
+      <button class="options-tab active" data-tab="shortcuts-tab">Shortcuts</button>
+      <button class="options-tab" data-tab="groups-tab">Groups</button>
+      <button class="options-tab" data-tab="analytics-tab">Analytics</button>
+      <button class="options-tab" data-tab="settings-tab">Settings</button>
+    </div>
 
-    <!-- Suggestions -->
-    <section class="suggestions-section" id="suggestions-section" style="display:none;">
-      <h2>Suggested Shortcuts</h2>
-      <p class="section-subtitle">Based on your browsing history</p>
-      <div id="suggestions-list"></div>
-    </section>
+    <!-- Tab: Shortcuts -->
+    <div class="tab-panel active" id="shortcuts-tab">
 
-    <!-- Groups -->
-    <section class="groups-section" id="groups-section">
-      <h2>Shortcut Groups</h2>
-      <p class="section-subtitle">Type a group key to open multiple tabs at once</p>
-      <div id="groups-list"></div>
-      <div class="group-add-form">
-        <h3>Add Group</h3>
-        <form id="add-group-form">
-          <div class="form-row">
-            <div class="form-group form-group-key">
-              <label for="group-key">Trigger Key</label>
-              <div class="input-with-suffix">
-                <input type="text" id="group-key" placeholder="e.g., fin" required>
-                <span class="input-suffix">/</span>
-              </div>
-            </div>
-            <div class="form-group">
-              <label for="group-desc">Description</label>
-              <input type="text" id="group-desc" placeholder="e.g., Finance Check" required>
-            </div>
-            <button type="submit" class="btn btn-add">Create Group</button>
-          </div>
-          <label class="group-members-label">Select shortcuts to include:</label>
-          <div class="group-member-select" id="group-members-select"></div>
-        </form>
-      </div>
-    </section>
+      <!-- Suggestions -->
+      <section class="suggestions-section" id="suggestions-section" style="display:none;">
+        <h2>Suggested Shortcuts</h2>
+        <p class="section-subtitle">Based on your browsing history</p>
+        <div id="suggestions-list"></div>
+      </section>
 
-    <!-- Add Shortcut -->
-    <section class="add-section" id="add-section">
+      <!-- Add Shortcut -->
+      <section class="add-section" id="add-section">
       <h2>Add New Shortcut</h2>
       <form id="add-form">
         <div class="form-row">
@@ -190,13 +164,63 @@
       <div id="shortcuts-list"></div>
     </section>
 
-    <!-- Footer Actions -->
-    <section class="actions-section">
-      <button id="reset-btn" class="btn btn-danger">Reset to Defaults</button>
-      <button id="export-btn" class="btn btn-secondary">Export</button>
-      <button id="import-btn" class="btn btn-secondary">Import</button>
-      <input type="file" id="import-file" accept=".json" hidden>
-    </section>
+    </div><!-- end shortcuts-tab -->
+
+    <!-- Tab: Groups -->
+    <div class="tab-panel" id="groups-tab">
+      <section class="groups-section" id="groups-section">
+        <h2>Shortcut Groups</h2>
+        <p class="section-subtitle">Type a group key to open multiple tabs at once</p>
+        <div id="groups-list"></div>
+        <div class="group-add-form">
+          <h3>Add Group</h3>
+          <form id="add-group-form">
+            <div class="form-row">
+              <div class="form-group form-group-key">
+                <label for="group-key">Trigger Key</label>
+                <div class="input-with-suffix">
+                  <input type="text" id="group-key" placeholder="e.g., fin" required>
+                  <span class="input-suffix">/</span>
+                </div>
+              </div>
+              <div class="form-group">
+                <label for="group-desc">Description</label>
+                <input type="text" id="group-desc" placeholder="e.g., Finance Check" required>
+              </div>
+              <button type="submit" class="btn btn-add">Create Group</button>
+            </div>
+            <label class="group-members-label">Select shortcuts to include:</label>
+            <div class="group-member-select" id="group-members-select"></div>
+          </form>
+        </div>
+      </section>
+    </div><!-- end groups-tab -->
+
+    <!-- Tab: Analytics -->
+    <div class="tab-panel" id="analytics-tab">
+      <section class="analytics-section" id="analytics-section">
+        <h2>Usage Analytics</h2>
+        <div id="analytics-content"></div>
+      </section>
+    </div><!-- end analytics-tab -->
+
+    <!-- Tab: Settings -->
+    <div class="tab-panel" id="settings-tab">
+      <section class="settings-panel">
+        <h2>Import / Export</h2>
+        <div class="actions-row">
+          <button id="export-btn" class="btn btn-secondary">Export Shortcuts</button>
+          <button id="import-btn" class="btn btn-secondary">Import Shortcuts</button>
+          <input type="file" id="import-file" accept=".json" hidden>
+        </div>
+      </section>
+      <section class="settings-panel">
+        <h2>Danger Zone</h2>
+        <p class="section-subtitle">This will replace all your shortcuts and groups with the defaults.</p>
+        <button id="reset-btn" class="btn btn-danger">Reset to Defaults</button>
+      </section>
+    </div><!-- end settings-tab -->
+
   </div>
 
   <div id="toast" class="toast"></div>

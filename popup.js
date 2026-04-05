@@ -201,4 +201,34 @@ document.addEventListener("DOMContentLoaded", async () => {
   document.getElementById("open-options").addEventListener("click", () => {
     chrome.runtime.openOptionsPage();
   });
+
+  // Close duplicate tabs
+  const dupeBtn = document.getElementById("close-dupes");
+  if (dupeBtn) {
+    const tabs = await chrome.tabs.query({ currentWindow: true });
+    const seen = new Set();
+    let dupeCount = 0;
+    for (const tab of tabs) {
+      if (seen.has(tab.url)) dupeCount++;
+      else seen.add(tab.url);
+    }
+    if (dupeCount > 0) {
+      dupeBtn.textContent = `Close ${dupeCount} duplicate${dupeCount > 1 ? "s" : ""}`;
+      dupeBtn.style.display = "block";
+      dupeBtn.addEventListener("click", async () => {
+        const allTabs = await chrome.tabs.query({ currentWindow: true });
+        const seenUrls = new Set();
+        const toClose = [];
+        for (const tab of allTabs) {
+          if (seenUrls.has(tab.url)) toClose.push(tab.id);
+          else seenUrls.add(tab.url);
+        }
+        if (toClose.length > 0) {
+          await chrome.tabs.remove(toClose);
+          dupeBtn.textContent = "Done!";
+          setTimeout(() => { dupeBtn.style.display = "none"; }, 1000);
+        }
+      });
+    }
+  }
 });
