@@ -5,17 +5,22 @@ async function loadShortcuts() {
   return shortcuts || {};
 }
 
+async function loadGroups() {
+  const { shortcutGroups } = await chrome.storage.sync.get("shortcutGroups");
+  return shortcutGroups || {};
+}
+
 async function getRecentlyUsed() {
   const { recentlyUsed } = await chrome.storage.local.get("recentlyUsed");
   return recentlyUsed || [];
 }
 
-function renderList(shortcuts, recentKeys, filter = "") {
+function renderList(shortcuts, groups, recentKeys, filter = "") {
   const list = document.getElementById("popup-list");
   list.innerHTML = "";
   selectedIndex = -1;
 
-  const entries = Object.entries(shortcuts)
+  const shortcutEntries = Object.entries(shortcuts)
     .filter(([key, value]) => {
       if (!filter) return true;
       const q = filter.toLowerCase();
@@ -24,12 +29,32 @@ function renderList(shortcuts, recentKeys, filter = "") {
     })
     .sort(([a], [b]) => a.localeCompare(b));
 
-  if (entries.length === 0) {
+  const groupEntries = Object.entries(groups)
+    .filter(([key, value]) => {
+      if (!filter) return true;
+      const q = filter.toLowerCase();
+      return key.includes(q) || value.description.toLowerCase().includes(q);
+    })
+    .sort(([a], [b]) => a.localeCompare(b));
+
+  if (shortcutEntries.length === 0 && groupEntries.length === 0) {
     list.innerHTML = '<div class="popup-empty">No shortcuts found.</div>';
     return;
   }
 
-  // Show recently used section if no filter and we have recent data
+  // Groups section
+  if (groupEntries.length > 0) {
+    const label = document.createElement("div");
+    label.className = "popup-section-label";
+    label.textContent = "Groups";
+    list.appendChild(label);
+
+    for (const [key, group] of groupEntries) {
+      list.appendChild(createGroupItem(key, group, shortcuts));
+    }
+  }
+
+  // Recently used section
   const recentEntries = [];
   if (!filter && recentKeys.length > 0) {
     for (const key of recentKeys) {
@@ -48,15 +73,18 @@ function renderList(shortcuts, recentKeys, filter = "") {
     for (const [key, value] of recentEntries) {
       list.appendChild(createItem(key, value));
     }
+  }
 
+  // All shortcuts
+  if (shortcutEntries.length > 0) {
     const allLabel = document.createElement("div");
     allLabel.className = "popup-section-label";
     allLabel.textContent = "All Shortcuts";
     list.appendChild(allLabel);
-  }
 
-  for (const [key, value] of entries) {
-    list.appendChild(createItem(key, value));
+    for (const [key, value] of shortcutEntries) {
+      list.appendChild(createItem(key, value));
+    }
   }
 }
 
@@ -66,6 +94,33 @@ function isTemplateUrl(url) {
 
 function getBaseUrl(url) {
   return url.replace(/\/?\{[^}]+\}.*$/, "");
+}
+
+function createGroupItem(key, group, shortcuts) {
+  const item = document.createElement("div");
+  item.className = "popup-item popup-group-item";
+  const count = group.shortcuts.length;
+  item.title = `Opens ${count} tabs: ${group.shortcuts.join(", ")}`;
+  item.innerHTML = `
+    <span class="popup-key popup-group-key">${escapeHtml(key)}/</span>
+    <span class="popup-desc">${escapeHtml(group.description)}</span>
+    <span class="popup-group-count">${count} tabs</span>
+  `;
+  item.addEventListener("click", async () => {
+    const urls = group.shortcuts
+      .map(k => {
+        const s = shortcuts[k];
+        if (!s) return null;
+        return isTemplateUrl(s.url) ? getBaseUrl(s.url) : s.url;
+      })
+      .filter(Boolean);
+
+    for (let i = 0; i < urls.length; i++) {
+      await chrome.tabs.create({ url: urls[i], active: i === urls.length - 1 });
+    }
+    window.close();
+  });
+  return item;
 }
 
 function createItem(key, value) {
@@ -109,13 +164,14 @@ function escapeHtml(str) {
 
 document.addEventListener("DOMContentLoaded", async () => {
   const shortcuts = await loadShortcuts();
+  const groups = await loadGroups();
   const recentKeys = await getRecentlyUsed();
-  renderList(shortcuts, recentKeys);
+  renderList(shortcuts, groups, recentKeys);
 
   const searchInput = document.getElementById("popup-search");
 
   searchInput.addEventListener("input", (e) => {
-    renderList(shortcuts, recentKeys, e.target.value);
+    renderList(shortcuts, groups, recentKeys, e.target.value);
   });
 
   searchInput.addEventListener("keydown", (e) => {

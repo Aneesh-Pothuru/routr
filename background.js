@@ -5,7 +5,6 @@ const DEFAULT_SHORTCUTS = {
   "d": { url: "https://drive.google.com", description: "Google Drive" },
   "gh": { url: "https://github.com/{repo}", description: "GitHub (or gh/repo for direct access)" },
   "yt": { url: "https://youtube.com", description: "YouTube" },
-  "gpt": { url: "https://chat.openai.com", description: "ChatGPT" },
   "cl": { url: "https://claude.ai", description: "Claude" },
   "docs": { url: "https://docs.google.com", description: "Google Docs" },
   "li": { url: "https://linkedin.com", description: "LinkedIn" },
@@ -38,11 +37,31 @@ const DEFAULT_SHORTCUTS = {
   "gm": { url: "https://mail.google.com/mail/u/0/#search/{query}", description: "Gmail Search (gm/search term)" }
 };
 
+const DEFAULT_GROUPS = {
+  "morning": {
+    description: "Morning Comms",
+    shortcuts: ["m", "ow", "c"]
+  },
+  "fin": {
+    description: "Finance Check",
+    shortcuts: ["rh", "vg", "rm", "ch", "cap"]
+  },
+  "dev": {
+    description: "Dev Session",
+    shortcuts: ["gh", "gcp", "cl", "ex"]
+  }
+};
+
 // --- Storage ---
 
 async function getShortcuts() {
   const { shortcuts } = await chrome.storage.sync.get("shortcuts");
   return shortcuts || DEFAULT_SHORTCUTS;
+}
+
+async function getShortcutGroups() {
+  const { shortcutGroups } = await chrome.storage.sync.get("shortcutGroups");
+  return shortcutGroups || DEFAULT_GROUPS;
 }
 
 // --- URL Template Helpers ---
@@ -52,7 +71,6 @@ function isTemplateUrl(url) {
 }
 
 function getBaseUrl(url) {
-  // Strip template parameters from URL: "https://github.com/{repo}" → "https://github.com"
   return url.replace(/\/?\{[^}]+\}.*$/, "");
 }
 
@@ -61,22 +79,17 @@ function escapeRegex(str) {
 }
 
 // --- DNR Rule Sync ---
-// Syncs all shortcuts as declarativeNetRequest dynamic redirect rules.
-// These fire BEFORE DNS resolution, so no /etc/hosts needed.
 
 async function syncRulesToDNR() {
   const shortcuts = await getShortcuts();
 
-  // Remove all existing dynamic rules first
   const existingRules = await chrome.declarativeNetRequest.getDynamicRules();
   const removeIds = existingRules.map(r => r.id);
 
-  // Build new rules
   const addRules = [];
   let id = 1;
 
   for (const [key, value] of Object.entries(shortcuts)) {
-    // Collect all keys (primary + aliases)
     const allKeys = [key];
     if (value.aliases && Array.isArray(value.aliases)) {
       allKeys.push(...value.aliases);
@@ -84,62 +97,43 @@ async function syncRulesToDNR() {
 
     for (const k of allKeys) {
       if (isTemplateUrl(value.url)) {
-        // Template shortcut: use regexFilter to capture path after key
-        // e.g. gh/{repo} → regex captures everything after "gh/"
-        // Rule 1: with parameter — gh/something → redirect with substitution
-        const templateUrl = value.url;
-        // Build regexSubstitution: replace {param} with \1
-        const regexSub = templateUrl.replace(/\{[^}]+\}/, "\\1");
+        const regexSub = value.url.replace(/\{[^}]+\}/, "\\1");
         addRules.push({
           id: id++,
           priority: 2,
-          action: {
-            type: "redirect",
-            redirect: { regexSubstitution: regexSub }
-          },
+          action: { type: "redirect", redirect: { regexSubstitution: regexSub } },
           condition: {
             regexFilter: `^https?://${escapeRegex(k)}/(.+)$`,
             resourceTypes: ["main_frame"]
           }
         });
 
-        // Rule 2: without parameter — just "gh/" → go to base URL (lower priority)
         const baseUrl = getBaseUrl(value.url);
         if (baseUrl) {
           addRules.push({
             id: id++,
             priority: 1,
             action: { type: "redirect", redirect: { url: baseUrl } },
-            condition: {
-              urlFilter: `||${k}/`,
-              resourceTypes: ["main_frame"]
-            }
+            condition: { urlFilter: `||${k}/`, resourceTypes: ["main_frame"] }
           });
         }
       } else {
-        // Static shortcut: simple urlFilter redirect
         addRules.push({
           id: id++,
           priority: 1,
           action: { type: "redirect", redirect: { url: value.url } },
-          condition: {
-            urlFilter: `||${k}/`,
-            resourceTypes: ["main_frame"]
-          }
+          condition: { urlFilter: `||${k}/`, resourceTypes: ["main_frame"] }
         });
       }
     }
   }
 
-  // Add rule for r/ → extension options page
+  // r/ → extension options page
   addRules.push({
     id: id++,
     priority: 3,
     action: { type: "redirect", redirect: { extensionPath: "/options.html" } },
-    condition: {
-      urlFilter: "||r/",
-      resourceTypes: ["main_frame"]
-    }
+    condition: { urlFilter: "||r/", resourceTypes: ["main_frame"] }
   });
 
   await chrome.declarativeNetRequest.updateDynamicRules({
@@ -148,17 +142,50 @@ async function syncRulesToDNR() {
   });
 }
 
-// --- Recently Used Tracking ---
+// --- Usage Tracking ---
 
 async function trackRecentUsage(key) {
   const { recentlyUsed } = await chrome.storage.local.get("recentlyUsed");
   let recent = recentlyUsed || [];
-  // Remove if already present, then prepend
   recent = recent.filter(k => k !== key);
   recent.unshift(key);
-  // Keep only last 5
   recent = recent.slice(0, 5);
   await chrome.storage.local.set({ recentlyUsed: recent });
+}
+
+async function trackUsage(key, type = "shortcut") {
+  const { usageLog } = await chrome.storage.local.get("usageLog");
+  let log = usageLog || [];
+  const entry = { key, ts: Date.now() };
+  if (type !== "shortcut") entry.type = type;
+  log.push(entry);
+  // Prune entries older than 90 days
+  const cutoff = Date.now() - 90 * 24 * 60 * 60 * 1000;
+  log = log.filter(e => e.ts > cutoff);
+  await chrome.storage.local.set({ usageLog: log });
+}
+
+function computeUsageSummary(log, shortcuts) {
+  const now = Date.now();
+  const weekAgo = now - 7 * 24 * 60 * 60 * 1000;
+  const monthAgo = now - 30 * 24 * 60 * 60 * 1000;
+  const summary = {};
+
+  // Initialize all shortcuts with zero counts
+  for (const key of Object.keys(shortcuts)) {
+    summary[key] = { count: 0, weekCount: 0, lastUsed: 0 };
+  }
+
+  for (const entry of log) {
+    if (!summary[entry.key]) {
+      summary[entry.key] = { count: 0, weekCount: 0, lastUsed: 0 };
+    }
+    summary[entry.key].count++;
+    if (entry.ts > weekAgo) summary[entry.key].weekCount++;
+    if (entry.ts > summary[entry.key].lastUsed) summary[entry.key].lastUsed = entry.ts;
+  }
+
+  return summary;
 }
 
 // --- Install ---
@@ -167,6 +194,10 @@ chrome.runtime.onInstalled.addListener(async () => {
   const { shortcuts } = await chrome.storage.sync.get("shortcuts");
   if (!shortcuts) {
     await chrome.storage.sync.set({ shortcuts: DEFAULT_SHORTCUTS });
+  }
+  const { shortcutGroups } = await chrome.storage.sync.get("shortcutGroups");
+  if (!shortcutGroups) {
+    await chrome.storage.sync.set({ shortcutGroups: DEFAULT_GROUPS });
   }
   await syncRulesToDNR();
 });
@@ -186,10 +217,33 @@ chrome.webNavigation.onErrorOccurred.addListener(async (details) => {
   const hostname = url.hostname.toLowerCase();
   if (hostname.includes(".")) return;
 
+  // Check groups first — groups take priority over individual shortcuts
+  const groups = await getShortcutGroups();
+  if (groups[hostname]) {
+    const group = groups[hostname];
+    const shortcuts = await getShortcuts();
+    const urls = group.shortcuts
+      .map(k => {
+        const s = shortcuts[k];
+        if (!s) return null;
+        return isTemplateUrl(s.url) ? getBaseUrl(s.url) : s.url;
+      })
+      .filter(Boolean);
+
+    for (let i = 0; i < urls.length; i++) {
+      await chrome.tabs.create({ url: urls[i], active: i === urls.length - 1 });
+    }
+    // Close the trigger tab
+    chrome.tabs.remove(details.tabId);
+    trackRecentUsage(hostname);
+    trackUsage(hostname, "group");
+    return;
+  }
+
+  // Then check individual shortcuts
   const shortcuts = await getShortcuts();
   const pathAfterSlash = url.pathname.replace(/^\/+/, "");
 
-  // Find matching shortcut (check primary key + aliases)
   let matchKey = null;
   let matchValue = null;
   for (const [key, value] of Object.entries(shortcuts)) {
@@ -208,7 +262,6 @@ chrome.webNavigation.onErrorOccurred.addListener(async (details) => {
   if (matchValue) {
     let targetUrl;
     if (pathAfterSlash && isTemplateUrl(matchValue.url)) {
-      // Replace template parameter with the path
       targetUrl = matchValue.url.replace(/\{[^}]+\}/, pathAfterSlash);
     } else if (isTemplateUrl(matchValue.url)) {
       targetUrl = getBaseUrl(matchValue.url);
@@ -217,26 +270,26 @@ chrome.webNavigation.onErrorOccurred.addListener(async (details) => {
     }
     chrome.tabs.update(details.tabId, { url: targetUrl });
     trackRecentUsage(matchKey);
+    trackUsage(matchKey);
   }
 });
 
-// --- Track DNR redirects via onBeforeNavigate ---
-// DNR fires before this, so if we see a navigation to a shortcut's target URL, log it.
+// --- Track DNR redirects ---
 
 chrome.webNavigation.onCommitted.addListener(async (details) => {
   if (details.frameId !== 0 || details.transitionType !== "typed") return;
-  // Check if the committed URL matches any shortcut target
   const shortcuts = await getShortcuts();
   for (const [key, value] of Object.entries(shortcuts)) {
-    if (details.url === value.url || details.url.startsWith(value.url)) {
+    const checkUrl = isTemplateUrl(value.url) ? getBaseUrl(value.url) : value.url;
+    if (details.url === checkUrl || details.url.startsWith(checkUrl)) {
       trackRecentUsage(key);
+      trackUsage(key);
       break;
     }
   }
 });
 
 // --- Broken Link Detection ---
-// Runs on service worker startup, checks each shortcut URL in the background.
 
 async function checkBrokenLinks() {
   const shortcuts = await getShortcuts();
@@ -246,8 +299,7 @@ async function checkBrokenLinks() {
     const checkUrl = isTemplateUrl(value.url) ? getBaseUrl(value.url) : value.url;
     if (!checkUrl) continue;
     try {
-      const resp = await fetch(checkUrl, { method: "HEAD", mode: "no-cors" });
-      // no-cors returns opaque responses (status 0), so we can only catch network errors
+      await fetch(checkUrl, { method: "HEAD", mode: "no-cors" });
     } catch {
       broken.push(key);
     }
@@ -256,8 +308,64 @@ async function checkBrokenLinks() {
   await chrome.storage.local.set({ brokenLinks: broken, brokenLinksCheckedAt: Date.now() });
 }
 
-// Run broken link check on startup, but don't block anything
+// --- History Scanning for Smart Suggestions ---
+
+async function scanHistory() {
+  // Only scan if history permission is available
+  if (!chrome.history) return;
+
+  const oneWeekAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
+  let items;
+  try {
+    items = await chrome.history.search({ text: "", startTime: oneWeekAgo, maxResults: 5000 });
+  } catch {
+    return;
+  }
+
+  // Count visits per domain
+  const domainCounts = {};
+  const domainUrls = {};
+  for (const item of items) {
+    try {
+      const parsed = new URL(item.url);
+      const domain = parsed.hostname.replace(/^www\./, "");
+      domainCounts[domain] = (domainCounts[domain] || 0) + (item.visitCount || 1);
+      if (!domainUrls[domain]) domainUrls[domain] = item.url;
+    } catch { continue; }
+  }
+
+  // Get existing shortcut domains
+  const shortcuts = await getShortcuts();
+  const existingDomains = new Set();
+  for (const value of Object.values(shortcuts)) {
+    try {
+      const d = new URL(isTemplateUrl(value.url) ? getBaseUrl(value.url) : value.url).hostname.replace(/^www\./, "");
+      existingDomains.add(d);
+    } catch { continue; }
+  }
+
+  // Filter out dismissed
+  const { dismissedSuggestions } = await chrome.storage.local.get("dismissedSuggestions");
+  const dismissed = new Set(dismissedSuggestions || []);
+
+  // Build suggestions: domains visited 5+ times without shortcuts
+  const suggestions = Object.entries(domainCounts)
+    .filter(([domain, count]) => count >= 5 && !existingDomains.has(domain) && !dismissed.has(domain))
+    .sort(([, a], [, b]) => b - a)
+    .slice(0, 10)
+    .map(([domain, count]) => ({
+      url: `https://${domain}`,
+      domain,
+      weeklyVisits: count,
+      suggestedKey: domain.split(".")[0].slice(0, 2).toLowerCase()
+    }));
+
+  await chrome.storage.local.set({ historySuggestions: suggestions, historyLastScanned: Date.now() });
+}
+
+// Run background tasks on startup
 checkBrokenLinks();
+scanHistory();
 
 // --- Message handler ---
 
@@ -267,7 +375,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     return true;
   }
   if (msg.type === "getDefaults") {
-    sendResponse(DEFAULT_SHORTCUTS);
+    sendResponse({ shortcuts: DEFAULT_SHORTCUTS, groups: DEFAULT_GROUPS });
     return true;
   }
   if (msg.type === "getBrokenLinks") {
@@ -278,10 +386,40 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     checkBrokenLinks().then(() => sendResponse({ ok: true }));
     return true;
   }
+  if (msg.type === "getGroups") {
+    getShortcutGroups().then(sendResponse);
+    return true;
+  }
+  if (msg.type === "getUsageSummary") {
+    (async () => {
+      const { usageLog } = await chrome.storage.local.get("usageLog");
+      const shortcuts = await getShortcuts();
+      sendResponse(computeUsageSummary(usageLog || [], shortcuts));
+    })();
+    return true;
+  }
+  if (msg.type === "getHistorySuggestions") {
+    chrome.storage.local.get(["historySuggestions", "historyLastScanned"]).then(sendResponse);
+    return true;
+  }
+  if (msg.type === "dismissSuggestion") {
+    (async () => {
+      const { dismissedSuggestions } = await chrome.storage.local.get("dismissedSuggestions");
+      const dismissed = dismissedSuggestions || [];
+      dismissed.push(msg.domain);
+      await chrome.storage.local.set({ dismissedSuggestions: dismissed });
+      await scanHistory();
+      sendResponse({ ok: true });
+    })();
+    return true;
+  }
+  if (msg.type === "rescanHistory") {
+    scanHistory().then(() => sendResponse({ ok: true }));
+    return true;
+  }
 });
 
 // --- Storage change listener ---
-// Sync DNR rules whenever shortcuts change (e.g., from another device via sync)
 
 chrome.storage.onChanged.addListener((changes, area) => {
   if (area === "sync" && changes.shortcuts) {

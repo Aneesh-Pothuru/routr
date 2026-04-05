@@ -4,6 +4,10 @@ let activeCategory = "all";
 let selectedForDelete = new Set();
 let categoryOverrides = {};
 let brokenLinks = [];
+let shortcutGroups = {};
+let usageSummary = {};
+let historySuggestions = [];
+let editingGroup = null;
 
 // --- Category Detection ---
 
@@ -597,7 +601,9 @@ async function handleReset() {
 
   try {
     const defaults = await chrome.runtime.sendMessage({ type: "getDefaults" });
-    shortcuts = defaults;
+    shortcuts = defaults.shortcuts || defaults;
+    shortcutGroups = defaults.groups || {};
+    await chrome.storage.sync.set({ shortcutGroups });
   } catch {
     shortcuts = {};
   }
@@ -608,6 +614,7 @@ async function handleReset() {
   updateStats();
   renderCategoryTabs();
   renderShortcuts();
+  renderGroups();
   showToast("Shortcuts reset to defaults!");
 }
 
@@ -687,6 +694,310 @@ function startDemoAnimation() {
   setTimeout(animateDemo, 800);
 }
 
+// --- Groups ---
+
+async function loadGroups() {
+  const { shortcutGroups } = await chrome.storage.sync.get("shortcutGroups");
+  return shortcutGroups || {};
+}
+
+async function saveGroups(data) {
+  await chrome.storage.sync.set({ shortcutGroups: data });
+  shortcutGroups = data;
+}
+
+function renderGroups() {
+  const container = document.getElementById("groups-list");
+  if (!container) return;
+  container.innerHTML = "";
+
+  const entries = Object.entries(shortcutGroups);
+  if (entries.length === 0) {
+    container.innerHTML = '<div class="empty-state">No groups yet. Create one to open multiple tabs at once.</div>';
+    return;
+  }
+
+  for (const [key, group] of entries) {
+    const card = document.createElement("div");
+    card.className = "group-card";
+
+    if (editingGroup === key) {
+      card.innerHTML = `
+        <div class="group-edit-form">
+          <input type="text" class="edit-group-key" value="${escapeHtml(key)}" placeholder="Trigger key">
+          <input type="text" class="edit-group-desc" value="${escapeHtml(group.description)}" placeholder="Description">
+          <div class="group-member-select" id="edit-group-members-${escapeHtml(key)}"></div>
+          <div class="group-edit-actions">
+            <button class="btn btn-sm btn-add save-group-btn">Save</button>
+            <button class="btn btn-sm btn-secondary cancel-group-btn">Cancel</button>
+          </div>
+        </div>
+      `;
+      // Populate member checkboxes
+      const memberDiv = card.querySelector(`#edit-group-members-${escapeHtml(key)}`);
+      for (const [sKey, sValue] of Object.entries(shortcuts).sort(([a], [b]) => a.localeCompare(b))) {
+        const checked = group.shortcuts.includes(sKey) ? "checked" : "";
+        const label = document.createElement("label");
+        label.className = "group-member-label";
+        label.innerHTML = `<input type="checkbox" value="${escapeHtml(sKey)}" ${checked}> <span class="shortcut-key">${escapeHtml(sKey)}/</span> ${escapeHtml(sValue.description)}`;
+        memberDiv.appendChild(label);
+      }
+      card.querySelector(".save-group-btn").addEventListener("click", () => handleSaveGroup(key, card));
+      card.querySelector(".cancel-group-btn").addEventListener("click", () => {
+        editingGroup = null;
+        renderGroups();
+      });
+    } else {
+      const memberBadges = group.shortcuts
+        .map(k => shortcuts[k] ? `<span class="group-member-badge" title="${escapeHtml(shortcuts[k].description)}">${escapeHtml(k)}/</span>` : `<span class="group-member-badge dangling">${escapeHtml(k)}/</span>`)
+        .join("");
+
+      card.innerHTML = `
+        <div class="group-header">
+          <span class="shortcut-key">${escapeHtml(key)}/</span>
+          <span class="group-desc">${escapeHtml(group.description)}</span>
+          <span class="group-count">${group.shortcuts.length} tabs</span>
+          <div class="group-actions">
+            <button class="btn btn-sm btn-edit edit-group-btn">Edit</button>
+            <button class="btn btn-sm btn-delete delete-group-btn">Delete</button>
+          </div>
+        </div>
+        <div class="group-members">${memberBadges}</div>
+      `;
+      card.querySelector(".edit-group-btn").addEventListener("click", () => {
+        editingGroup = key;
+        renderGroups();
+      });
+      card.querySelector(".delete-group-btn").addEventListener("click", () => handleDeleteGroup(key));
+    }
+
+    container.appendChild(card);
+  }
+}
+
+async function handleAddGroup(e) {
+  e.preventDefault();
+  const keyInput = document.getElementById("group-key");
+  const descInput = document.getElementById("group-desc");
+  const memberDiv = document.getElementById("group-members-select");
+
+  const key = keyInput.value.trim().toLowerCase().replace(/\/+$/, "");
+  const desc = descInput.value.trim();
+
+  if (!validateKey(key)) {
+    showToast("Group key must be lowercase letters, numbers, hyphens, or underscores.", true);
+    return;
+  }
+  if (!desc) {
+    showToast("Description is required.", true);
+    return;
+  }
+
+  const selected = [...memberDiv.querySelectorAll("input:checked")].map(cb => cb.value);
+  if (selected.length < 2) {
+    showToast("Select at least 2 shortcuts for a group.", true);
+    return;
+  }
+
+  if (shortcutGroups[key] && !confirm(`Group "${key}/" already exists. Overwrite?`)) return;
+  if (shortcuts[key]) {
+    showToast(`"${key}/" conflicts with an existing shortcut. Choose a different key.`, true);
+    return;
+  }
+
+  shortcutGroups[key] = { description: desc, shortcuts: selected };
+  await saveGroups(shortcutGroups);
+
+  keyInput.value = "";
+  descInput.value = "";
+  memberDiv.querySelectorAll("input").forEach(cb => cb.checked = false);
+  renderGroups();
+  showToast(`Group "${key}/" created! Type it in your address bar to open ${selected.length} tabs.`);
+}
+
+async function handleSaveGroup(oldKey, card) {
+  const newKey = card.querySelector(".edit-group-key").value.trim().toLowerCase().replace(/\/+$/, "");
+  const newDesc = card.querySelector(".edit-group-desc").value.trim();
+  const selected = [...card.querySelectorAll(".group-member-select input:checked")].map(cb => cb.value);
+
+  if (!validateKey(newKey)) {
+    showToast("Group key must be lowercase letters, numbers, hyphens, or underscores.", true);
+    return;
+  }
+  if (!newDesc) {
+    showToast("Description is required.", true);
+    return;
+  }
+  if (selected.length < 2) {
+    showToast("Select at least 2 shortcuts for a group.", true);
+    return;
+  }
+
+  if (newKey !== oldKey) {
+    delete shortcutGroups[oldKey];
+    if (shortcuts[newKey]) {
+      showToast(`"${newKey}/" conflicts with an existing shortcut.`, true);
+      return;
+    }
+  }
+
+  shortcutGroups[newKey] = { description: newDesc, shortcuts: selected };
+  await saveGroups(shortcutGroups);
+  editingGroup = null;
+  renderGroups();
+  showToast(`Group "${newKey}/" updated!`);
+}
+
+async function handleDeleteGroup(key) {
+  if (!confirm(`Delete group "${key}/"?`)) return;
+  delete shortcutGroups[key];
+  await saveGroups(shortcutGroups);
+  renderGroups();
+  showToast(`Group "${key}/" deleted.`);
+}
+
+function populateGroupMemberCheckboxes(containerId) {
+  const container = document.getElementById(containerId);
+  if (!container) return;
+  container.innerHTML = "";
+  for (const [sKey, sValue] of Object.entries(shortcuts).sort(([a], [b]) => a.localeCompare(b))) {
+    const label = document.createElement("label");
+    label.className = "group-member-label";
+    label.innerHTML = `<input type="checkbox" value="${escapeHtml(sKey)}"> <span class="shortcut-key">${escapeHtml(sKey)}/</span> ${escapeHtml(sValue.description)}`;
+    container.appendChild(label);
+  }
+}
+
+// --- Analytics Dashboard ---
+
+async function loadUsageSummary() {
+  try {
+    usageSummary = await chrome.runtime.sendMessage({ type: "getUsageSummary" });
+  } catch {
+    usageSummary = {};
+  }
+}
+
+function renderAnalytics() {
+  const container = document.getElementById("analytics-content");
+  if (!container) return;
+
+  const entries = Object.entries(usageSummary).filter(([key]) => shortcuts[key]);
+
+  // Most used this week
+  const topWeek = entries
+    .filter(([, s]) => s.weekCount > 0)
+    .sort(([, a], [, b]) => b.weekCount - a.weekCount)
+    .slice(0, 5);
+
+  // Unused in 30 days
+  const thirtyDaysAgo = Date.now() - 30 * 24 * 60 * 60 * 1000;
+  const unused = entries
+    .filter(([, s]) => s.lastUsed === 0 || s.lastUsed < thirtyDaysAgo)
+    .sort(([a], [b]) => a.localeCompare(b));
+
+  let html = '<div class="analytics-grid">';
+
+  // Top used
+  html += '<div class="analytics-card"><h3>Most Used This Week</h3>';
+  if (topWeek.length === 0) {
+    html += '<p class="analytics-empty">No usage data yet. Start using your shortcuts!</p>';
+  } else {
+    html += '<div class="analytics-list">';
+    for (const [key, stats] of topWeek) {
+      const desc = shortcuts[key] ? shortcuts[key].description : key;
+      html += `<div class="analytics-row">
+        <span class="shortcut-key">${escapeHtml(key)}/</span>
+        <span class="analytics-desc">${escapeHtml(desc)}</span>
+        <span class="analytics-count">${stats.weekCount}x</span>
+      </div>`;
+    }
+    html += '</div>';
+  }
+  html += '</div>';
+
+  // Unused
+  html += '<div class="analytics-card"><h3>Unused (30+ days)</h3>';
+  if (unused.length === 0) {
+    html += '<p class="analytics-empty">All shortcuts are active!</p>';
+  } else {
+    html += '<div class="analytics-list">';
+    for (const [key] of unused.slice(0, 8)) {
+      const desc = shortcuts[key] ? shortcuts[key].description : key;
+      html += `<div class="analytics-row">
+        <span class="shortcut-key">${escapeHtml(key)}/</span>
+        <span class="analytics-desc">${escapeHtml(desc)}</span>
+        <button class="btn btn-sm btn-delete analytics-delete" data-key="${escapeHtml(key)}">Remove</button>
+      </div>`;
+    }
+    if (unused.length > 8) {
+      html += `<p class="analytics-more">+${unused.length - 8} more unused shortcuts</p>`;
+    }
+    html += '</div>';
+  }
+  html += '</div></div>';
+
+  container.innerHTML = html;
+
+  // Wire up delete buttons
+  container.querySelectorAll(".analytics-delete").forEach(btn => {
+    btn.addEventListener("click", () => handleDelete(btn.dataset.key));
+  });
+}
+
+// --- Suggestions ---
+
+async function loadSuggestions() {
+  try {
+    const result = await chrome.runtime.sendMessage({ type: "getHistorySuggestions" });
+    historySuggestions = result.historySuggestions || [];
+  } catch {
+    historySuggestions = [];
+  }
+}
+
+function renderSuggestions() {
+  const container = document.getElementById("suggestions-section");
+  if (!container) return;
+
+  if (historySuggestions.length === 0) {
+    container.style.display = "none";
+    return;
+  }
+
+  container.style.display = "block";
+  const list = document.getElementById("suggestions-list");
+  list.innerHTML = "";
+
+  for (const suggestion of historySuggestions) {
+    const row = document.createElement("div");
+    row.className = "suggestion-row";
+    row.innerHTML = `
+      <span class="suggestion-domain">${escapeHtml(suggestion.domain)}</span>
+      <span class="suggestion-visits">${suggestion.weeklyVisits}x this week</span>
+      <span class="suggestion-key">${escapeHtml(suggestion.suggestedKey)}/</span>
+      <div class="suggestion-actions">
+        <button class="btn btn-sm btn-add add-suggestion-btn">Add</button>
+        <button class="btn btn-sm btn-secondary dismiss-suggestion-btn">Dismiss</button>
+      </div>
+    `;
+    row.querySelector(".add-suggestion-btn").addEventListener("click", () => {
+      document.getElementById("shortcut-key").value = suggestion.suggestedKey;
+      document.getElementById("shortcut-url").value = suggestion.url;
+      document.getElementById("shortcut-desc").value = suggestion.domain;
+      document.getElementById("shortcut-url").focus();
+      document.getElementById("add-section").scrollIntoView({ behavior: "smooth" });
+    });
+    row.querySelector(".dismiss-suggestion-btn").addEventListener("click", async () => {
+      await chrome.runtime.sendMessage({ type: "dismissSuggestion", domain: suggestion.domain });
+      await loadSuggestions();
+      renderSuggestions();
+      showToast(`Dismissed suggestion for ${suggestion.domain}.`);
+    });
+    list.appendChild(row);
+  }
+}
+
 // --- Broken Links UI ---
 
 async function loadBrokenLinks() {
@@ -703,15 +1014,23 @@ async function loadBrokenLinks() {
 document.addEventListener("DOMContentLoaded", async () => {
   shortcuts = await loadShortcuts();
   categoryOverrides = await loadCategoryOverrides();
+  shortcutGroups = await loadGroups();
   await loadBrokenLinks();
+  await loadUsageSummary();
+  await loadSuggestions();
 
   updateStats();
   renderCategoryTabs();
   renderShortcuts();
+  renderGroups();
+  renderAnalytics();
+  renderSuggestions();
+  populateGroupMemberCheckboxes("group-members-select");
   checkQueryParams();
   startDemoAnimation();
 
   document.getElementById("add-form").addEventListener("submit", handleAdd);
+  document.getElementById("add-group-form").addEventListener("submit", handleAddGroup);
   document.getElementById("search").addEventListener("input", handleSearch);
   document.getElementById("reset-btn").addEventListener("click", handleReset);
   document.getElementById("export-btn").addEventListener("click", handleExport);
@@ -725,4 +1044,14 @@ document.addEventListener("DOMContentLoaded", async () => {
     updateBulkBar();
     renderShortcuts(document.getElementById("search").value);
   });
+
+  // Analytics toggle
+  const analyticsToggle = document.getElementById("analytics-toggle");
+  if (analyticsToggle) {
+    analyticsToggle.addEventListener("click", () => {
+      const content = document.getElementById("analytics-content");
+      content.classList.toggle("collapsed");
+      analyticsToggle.textContent = content.classList.contains("collapsed") ? "Show" : "Hide";
+    });
+  }
 });

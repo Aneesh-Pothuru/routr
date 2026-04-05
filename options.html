@@ -89,6 +89,50 @@
   <!-- Main Content -->
   <div class="container">
 
+    <!-- Analytics Dashboard -->
+    <section class="analytics-section" id="analytics-section">
+      <div class="section-header">
+        <h2>Usage Analytics</h2>
+        <button id="analytics-toggle" class="btn btn-sm btn-secondary">Hide</button>
+      </div>
+      <div id="analytics-content"></div>
+    </section>
+
+    <!-- Suggestions -->
+    <section class="suggestions-section" id="suggestions-section" style="display:none;">
+      <h2>Suggested Shortcuts</h2>
+      <p class="section-subtitle">Based on your browsing history</p>
+      <div id="suggestions-list"></div>
+    </section>
+
+    <!-- Groups -->
+    <section class="groups-section" id="groups-section">
+      <h2>Shortcut Groups</h2>
+      <p class="section-subtitle">Type a group key to open multiple tabs at once</p>
+      <div id="groups-list"></div>
+      <div class="group-add-form">
+        <h3>Add Group</h3>
+        <form id="add-group-form">
+          <div class="form-row">
+            <div class="form-group form-group-key">
+              <label for="group-key">Trigger Key</label>
+              <div class="input-with-suffix">
+                <input type="text" id="group-key" placeholder="e.g., fin" required>
+                <span class="input-suffix">/</span>
+              </div>
+            </div>
+            <div class="form-group">
+              <label for="group-desc">Description</label>
+              <input type="text" id="group-desc" placeholder="e.g., Finance Check" required>
+            </div>
+            <button type="submit" class="btn btn-add">Create Group</button>
+          </div>
+          <label class="group-members-label">Select shortcuts to include:</label>
+          <div class="group-member-select" id="group-members-select"></div>
+        </form>
+      </div>
+    </section>
+
     <!-- Add Shortcut -->
     <section class="add-section" id="add-section">
       <h2>Add New Shortcut</h2>
