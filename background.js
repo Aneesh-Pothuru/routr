@@ -71,7 +71,20 @@ function isTemplateUrl(url) {
 }
 
 function getBaseUrl(url) {
-  return url.replace(/\/?\{[^}]+\}.*$/, "");
+  try {
+    const templateIdx = url.indexOf("{");
+    if (templateIdx === -1) return url;
+    const beforeTemplate = url.substring(0, templateIdx);
+    // If template is in query string or hash, return just the origin
+    if (beforeTemplate.includes("?") || beforeTemplate.includes("#")) {
+      const parsed = new URL(url.replace(/\{[^}]+\}/g, "x"));
+      return parsed.origin;
+    }
+    // Template is in path — strip the segment containing it
+    return beforeTemplate.replace(/\/?$/, "") || new URL(url.replace(/\{[^}]+\}/g, "x")).origin;
+  } catch {
+    return url.replace(/\/?\{[^}]+\}.*$/, "");
+  }
 }
 
 function escapeRegex(str) {
@@ -417,7 +430,239 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     scanHistory().then(() => sendResponse({ ok: true }));
     return true;
   }
+  if (msg.type === "getSessions") {
+    getSessions().then(sendResponse);
+    return true;
+  }
+  if (msg.type === "saveSession") {
+    (async () => {
+      const tabs = await chrome.tabs.query({ currentWindow: true });
+      const sessionTabs = tabs.map(t => ({ url: t.url, title: t.title || "" })).filter(t => t.url && !t.url.startsWith("chrome://"));
+      const all = await getSessions();
+      const id = Date.now().toString(36);
+      const now = new Date();
+      const name = msg.name || `Session ${now.toLocaleDateString()} ${now.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`;
+      all[id] = { name, created: Date.now(), tabs: sessionTabs };
+      await chrome.storage.local.set({ sessions: all });
+      sendResponse({ ok: true, id, count: sessionTabs.length });
+    })();
+    return true;
+  }
+  if (msg.type === "restoreSession") {
+    (async () => {
+      const all = await getSessions();
+      const session = all[msg.id];
+      if (session) {
+        for (const tab of session.tabs) {
+          await chrome.tabs.create({ url: tab.url, active: false });
+        }
+        sendResponse({ ok: true, count: session.tabs.length });
+      } else {
+        sendResponse({ ok: false });
+      }
+    })();
+    return true;
+  }
+  if (msg.type === "deleteSession") {
+    (async () => {
+      const all = await getSessions();
+      delete all[msg.id];
+      await chrome.storage.local.set({ sessions: all });
+      sendResponse({ ok: true });
+    })();
+    return true;
+  }
+  if (msg.type === "renameSession") {
+    (async () => {
+      const all = await getSessions();
+      if (all[msg.id]) {
+        all[msg.id].name = msg.name;
+        await chrome.storage.local.set({ sessions: all });
+      }
+      sendResponse({ ok: true });
+    })();
+    return true;
+  }
 });
+
+// --- Omnibox ---
+
+function escapeXml(str) {
+  return str.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+}
+
+chrome.omnibox.onInputStarted.addListener(() => {
+  chrome.omnibox.setDefaultSuggestion({
+    description: "Search shortcuts or type <match>add [key]</match> to save this page"
+  });
+});
+
+chrome.omnibox.onInputChanged.addListener(async (text, suggest) => {
+  const trimmed = text.trim().toLowerCase();
+  const shortcuts = await getShortcuts();
+  const groups = await getShortcutGroups();
+  const suggestions = [];
+
+  if (trimmed.startsWith("add")) {
+    const key = trimmed.replace(/^add\s*/, "").trim();
+    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    if (tab) {
+      const title = escapeXml(tab.title || "current page");
+      const displayKey = key || autoKey(tab.url);
+      suggestions.push({
+        content: `add ${displayKey}`,
+        description: `Save <match>${title}</match> as <match>${escapeXml(displayKey)}/</match>`
+      });
+    }
+  } else if (trimmed === "sessions" || trimmed === "session") {
+    suggestions.push({
+      content: "save-session",
+      description: "Save all open tabs as a <match>session snapshot</match>"
+    });
+    const { sessions } = await chrome.storage.local.get("sessions");
+    if (sessions) {
+      for (const [id, session] of Object.entries(sessions).slice(0, 4)) {
+        suggestions.push({
+          content: `restore:${id}`,
+          description: `Restore <match>${escapeXml(session.name)}</match> <dim>(${session.tabs.length} tabs)</dim>`
+        });
+      }
+    }
+  } else {
+    for (const [key, group] of Object.entries(groups)) {
+      if (key.includes(trimmed) || group.description.toLowerCase().includes(trimmed)) {
+        suggestions.push({
+          content: `group:${key}`,
+          description: `<dim>[Group]</dim> <match>${escapeXml(key)}/</match> — ${escapeXml(group.description)} <dim>(${group.shortcuts.length} tabs)</dim>`
+        });
+      }
+    }
+    for (const [key, value] of Object.entries(shortcuts)) {
+      if (key.includes(trimmed) || value.description.toLowerCase().includes(trimmed)) {
+        const url = escapeXml(value.url.replace(/^https?:\/\//, "").slice(0, 40));
+        suggestions.push({
+          content: key,
+          description: `<match>${escapeXml(key)}/</match> — ${escapeXml(value.description)} <dim>${url}</dim>`
+        });
+      }
+    }
+  }
+
+  suggest(suggestions.slice(0, 8));
+});
+
+chrome.omnibox.onInputEntered.addListener(async (text, disposition) => {
+  const trimmed = text.trim();
+
+  // Save session
+  if (trimmed === "save-session") {
+    const tabs = await chrome.tabs.query({ currentWindow: true });
+    const sessionTabs = tabs.map(t => ({ url: t.url, title: t.title || "" })).filter(t => t.url && !t.url.startsWith("chrome://"));
+    const { sessions } = await chrome.storage.local.get("sessions");
+    const all = sessions || {};
+    const id = Date.now().toString(36);
+    const now = new Date();
+    all[id] = { name: `Session ${now.toLocaleDateString()} ${now.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`, created: Date.now(), tabs: sessionTabs };
+    await chrome.storage.local.set({ sessions: all });
+    chrome.action.setBadgeText({ text: "OK" });
+    chrome.action.setBadgeBackgroundColor({ color: "#238636" });
+    setTimeout(() => chrome.action.setBadgeText({ text: "" }), 2000);
+    return;
+  }
+
+  // Restore session
+  if (trimmed.startsWith("restore:")) {
+    const id = trimmed.replace("restore:", "");
+    const { sessions } = await chrome.storage.local.get("sessions");
+    if (sessions && sessions[id]) {
+      for (const tab of sessions[id].tabs) {
+        await chrome.tabs.create({ url: tab.url, active: false });
+      }
+    }
+    return;
+  }
+
+  // Quick-add
+  if (trimmed.toLowerCase().startsWith("add")) {
+    const key = trimmed.replace(/^add\s*/i, "").trim().toLowerCase();
+    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    if (!tab || !tab.url) return;
+
+    const shortcuts = await getShortcuts();
+    const shortcutKey = key && /^[a-z0-9\-_]+$/.test(key) ? key : autoKey(tab.url);
+
+    shortcuts[shortcutKey] = {
+      url: tab.url,
+      description: tab.title || shortcutKey
+    };
+
+    await chrome.storage.sync.set({ shortcuts });
+    await syncRulesToDNR();
+
+    chrome.action.setBadgeText({ text: "+" });
+    chrome.action.setBadgeBackgroundColor({ color: "#238636" });
+    setTimeout(() => chrome.action.setBadgeText({ text: "" }), 2000);
+    return;
+  }
+
+  // Open group
+  if (trimmed.startsWith("group:")) {
+    const groupKey = trimmed.replace("group:", "");
+    const groups = await getShortcutGroups();
+    const group = groups[groupKey];
+    if (group) {
+      const shortcuts = await getShortcuts();
+      const urls = group.shortcuts
+        .map(k => { const s = shortcuts[k]; return s ? (isTemplateUrl(s.url) ? getBaseUrl(s.url) : s.url) : null; })
+        .filter(Boolean);
+      for (const url of urls) {
+        await chrome.tabs.create({ url, active: false });
+      }
+      trackUsage(groupKey, "group");
+    }
+    return;
+  }
+
+  // Navigate to shortcut
+  const shortcuts = await getShortcuts();
+  const parts = trimmed.split("/");
+  const key = parts[0].toLowerCase();
+  const param = parts.slice(1).join("/");
+
+  if (shortcuts[key]) {
+    let url;
+    if (param && isTemplateUrl(shortcuts[key].url)) {
+      url = shortcuts[key].url.replace(/\{[^}]+\}/, param);
+    } else {
+      url = isTemplateUrl(shortcuts[key].url) ? getBaseUrl(shortcuts[key].url) : shortcuts[key].url;
+    }
+
+    if (disposition === "currentTab") {
+      const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+      chrome.tabs.update(tab.id, { url });
+    } else {
+      chrome.tabs.create({ url, active: disposition === "newForegroundTab" });
+    }
+    trackRecentUsage(key);
+    trackUsage(key);
+  }
+});
+
+function autoKey(url) {
+  try {
+    const domain = new URL(url).hostname.replace(/^www\./, "");
+    return domain.split(".")[0].slice(0, 3).toLowerCase();
+  } catch {
+    return "new";
+  }
+}
+
+// --- Sessions ---
+
+async function getSessions() {
+  const { sessions } = await chrome.storage.local.get("sessions");
+  return sessions || {};
+}
 
 // --- Storage change listener ---
 

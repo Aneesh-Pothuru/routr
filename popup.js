@@ -93,7 +93,18 @@ function isTemplateUrl(url) {
 }
 
 function getBaseUrl(url) {
-  return url.replace(/\/?\{[^}]+\}.*$/, "");
+  try {
+    const templateIdx = url.indexOf("{");
+    if (templateIdx === -1) return url;
+    const beforeTemplate = url.substring(0, templateIdx);
+    if (beforeTemplate.includes("?") || beforeTemplate.includes("#")) {
+      const parsed = new URL(url.replace(/\{[^}]+\}/g, "x"));
+      return parsed.origin;
+    }
+    return beforeTemplate.replace(/\/?$/, "") || new URL(url.replace(/\{[^}]+\}/g, "x")).origin;
+  } catch {
+    return url.replace(/\/?\{[^}]+\}.*$/, "");
+  }
 }
 
 function createGroupItem(key, group, shortcuts) {
@@ -131,7 +142,10 @@ function createItem(key, value) {
   const hasTemplate = isTemplateUrl(value.url);
   const templateHint = hasTemplate ? '<span class="popup-template">{..}</span>' : "";
   const navigateUrl = hasTemplate ? getBaseUrl(value.url) : value.url;
+  const faviconSrc = getFaviconUrl(value.url);
+  const faviconImg = faviconSrc ? `<img class="popup-favicon" src="${faviconSrc}" alt="">` : "";
   item.innerHTML = `
+    ${faviconImg}
     <span class="popup-key">${escapeHtml(key)}/${templateHint}</span>
     <span class="popup-desc">${escapeHtml(value.description)}</span>
     <span class="popup-url">${escapeHtml(displayUrl)}</span>
@@ -160,6 +174,15 @@ function escapeHtml(str) {
   const div = document.createElement("div");
   div.textContent = str;
   return div.innerHTML;
+}
+
+function getFaviconUrl(url, size = 16) {
+  try {
+    const domain = new URL(url).hostname;
+    return `https://www.google.com/s2/favicons?domain=${domain}&sz=${size}`;
+  } catch {
+    return null;
+  }
 }
 
 document.addEventListener("DOMContentLoaded", async () => {
@@ -201,6 +224,52 @@ document.addEventListener("DOMContentLoaded", async () => {
   document.getElementById("open-options").addEventListener("click", () => {
     chrome.runtime.openOptionsPage();
   });
+
+  // Sessions
+  const saveSessionBtn = document.getElementById("save-session");
+  const sessionsList = document.getElementById("sessions-list");
+
+  async function renderSessions() {
+    try {
+      const sessions = await chrome.runtime.sendMessage({ type: "getSessions" });
+      sessionsList.innerHTML = "";
+      const entries = Object.entries(sessions).sort(([, a], [, b]) => b.created - a.created).slice(0, 4);
+      for (const [id, session] of entries) {
+        const item = document.createElement("div");
+        item.className = "session-item";
+        item.innerHTML = `
+          <span class="session-name">${escapeHtml(session.name)}</span>
+          <span class="session-meta">${session.tabs.length} tabs</span>
+          <button class="session-restore-btn">Restore</button>
+        `;
+        item.querySelector(".session-restore-btn").addEventListener("click", async (e) => {
+          e.stopPropagation();
+          await chrome.runtime.sendMessage({ type: "restoreSession", id });
+          const btn = e.target;
+          btn.textContent = "Done!";
+          setTimeout(() => window.close(), 500);
+        });
+        sessionsList.appendChild(item);
+      }
+    } catch {}
+  }
+
+  saveSessionBtn.addEventListener("click", async () => {
+    const result = await chrome.runtime.sendMessage({ type: "saveSession" });
+    if (result.ok) {
+      saveSessionBtn.textContent = `Saved ${result.count} tabs!`;
+      saveSessionBtn.style.borderColor = "#238636";
+      saveSessionBtn.style.color = "#238636";
+      await renderSessions();
+      setTimeout(() => {
+        saveSessionBtn.textContent = "Save open tabs as session";
+        saveSessionBtn.style.borderColor = "#a371f7";
+        saveSessionBtn.style.color = "#a371f7";
+      }, 2000);
+    }
+  });
+
+  renderSessions();
 
   // Close duplicate tabs
   const dupeBtn = document.getElementById("close-dupes");

@@ -23,13 +23,33 @@ function isTemplateUrl(url) {
 }
 
 function getBaseUrl(url) {
-  return url.replace(/\/?\{[^}]+\}.*$/, "");
+  try {
+    const templateIdx = url.indexOf("{");
+    if (templateIdx === -1) return url;
+    const beforeTemplate = url.substring(0, templateIdx);
+    if (beforeTemplate.includes("?") || beforeTemplate.includes("#")) {
+      const parsed = new URL(url.replace(/\{[^}]+\}/g, "x"));
+      return parsed.origin;
+    }
+    return beforeTemplate.replace(/\/?$/, "") || new URL(url.replace(/\{[^}]+\}/g, "x")).origin;
+  } catch {
+    return url.replace(/\/?\{[^}]+\}.*$/, "");
+  }
 }
 
 function escapeHtml(str) {
   const div = document.createElement("div");
   div.textContent = str;
   return div.innerHTML;
+}
+
+function getFaviconUrl(url, size = 32) {
+  try {
+    const domain = new URL(url.replace(/\{[^}]+\}/g, "x")).hostname;
+    return `https://www.google.com/s2/favicons?domain=${domain}&sz=${size}`;
+  } catch {
+    return null;
+  }
 }
 
 // --- Time Awareness ---
@@ -140,9 +160,10 @@ function renderTiles(containerId, entries) {
     tile.className = "tile";
     const navigateUrl = isTemplateUrl(value.url) ? getBaseUrl(value.url) : value.url;
     tile.href = navigateUrl;
+    const faviconSrc = getFaviconUrl(value.url);
     const initial = key.charAt(0).toUpperCase();
     tile.innerHTML = `
-      <div class="tile-icon">${initial}</div>
+      <div class="tile-icon">${faviconSrc ? `<img src="${faviconSrc}" class="tile-favicon" alt="${initial}">` : initial}</div>
       <div class="tile-name">${escapeHtml(value.description)}</div>
       <div class="tile-key">${escapeHtml(key)}/</div>
     `;
@@ -219,7 +240,10 @@ function setupSearch(shortcuts, groups) {
         });
       } else {
         const url = isTemplateUrl(item.data.url) ? getBaseUrl(item.data.url) : item.data.url;
+        const favicon = getFaviconUrl(item.data.url, 16);
+        const faviconImg = favicon ? `<img src="${favicon}" style="width:16px;height:16px;border-radius:2px;">` : "";
         row.innerHTML = `
+          ${faviconImg}
           <span class="search-result-key">${escapeHtml(item.key)}/</span>
           <span class="search-result-desc">${escapeHtml(item.data.description)}</span>
           <span class="search-result-meta">${escapeHtml(item.data.url.replace(/^https?:\/\//, "").slice(0, 30))}</span>

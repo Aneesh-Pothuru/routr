@@ -61,7 +61,18 @@ function isTemplateUrl(url) {
 }
 
 function getBaseUrl(url) {
-  return url.replace(/\/?\{[^}]+\}.*$/, "");
+  try {
+    const templateIdx = url.indexOf("{");
+    if (templateIdx === -1) return url;
+    const beforeTemplate = url.substring(0, templateIdx);
+    if (beforeTemplate.includes("?") || beforeTemplate.includes("#")) {
+      const parsed = new URL(url.replace(/\{[^}]+\}/g, "x"));
+      return parsed.origin;
+    }
+    return beforeTemplate.replace(/\/?$/, "") || new URL(url.replace(/\{[^}]+\}/g, "x")).origin;
+  } catch {
+    return url.replace(/\/?\{[^}]+\}.*$/, "");
+  }
 }
 
 // --- Storage ---
@@ -219,10 +230,13 @@ function renderShortcuts(filter = "") {
       const aliasDisplay = (value.aliases && value.aliases.length > 0)
         ? value.aliases.map(a => escapeHtml(a) + "/").join(", ")
         : "";
+      const faviconSrc = getFaviconUrl(value.url);
+      const faviconImg = faviconSrc ? `<img src="${faviconSrc}" class="shortcut-favicon" alt="">` : "";
 
       row.innerHTML = `
         <div><input type="checkbox" class="shortcut-checkbox" data-key="${escapeHtml(key)}" ${checked}></div>
-        <div>
+        <div class="shortcut-key-cell">
+          ${faviconImg}
           <span class="shortcut-key">${escapeHtml(key)}/</span>
           ${templateBadge}
           ${brokenIcon}
@@ -906,7 +920,10 @@ function renderAnalytics() {
     html += '<div class="analytics-list">';
     for (const [key, stats] of topWeek) {
       const desc = shortcuts[key] ? shortcuts[key].description : key;
+      const favicon = shortcuts[key] ? getFaviconUrl(shortcuts[key].url) : null;
+      const favImg = favicon ? `<img src="${favicon}" class="shortcut-favicon" alt="">` : "";
       html += `<div class="analytics-row">
+        ${favImg}
         <span class="shortcut-key">${escapeHtml(key)}/</span>
         <span class="analytics-desc">${escapeHtml(desc)}</span>
         <span class="analytics-count">${stats.weekCount}x</span>
@@ -998,6 +1015,117 @@ function renderSuggestions() {
   }
 }
 
+// --- Favicon Helper ---
+
+function getFaviconUrl(url, size = 16) {
+  try {
+    const domain = new URL(url.replace(/\{[^}]+\}/g, "x")).hostname;
+    return `https://www.google.com/s2/favicons?domain=${domain}&sz=${size}`;
+  } catch {
+    return null;
+  }
+}
+
+// --- Sessions ---
+
+let sessions = {};
+
+async function loadSessions() {
+  try {
+    sessions = await chrome.runtime.sendMessage({ type: "getSessions" });
+  } catch {
+    sessions = {};
+  }
+}
+
+function renderSessions() {
+  const container = document.getElementById("sessions-list-options");
+  if (!container) return;
+  container.innerHTML = "";
+
+  const entries = Object.entries(sessions).sort(([, a], [, b]) => b.created - a.created);
+
+  if (entries.length === 0) {
+    container.innerHTML = '<div class="empty-state">No saved sessions yet. Save your open tabs to create a session.</div>';
+    return;
+  }
+
+  for (const [id, session] of entries) {
+    const card = document.createElement("div");
+    card.className = "session-card";
+
+    const dateStr = new Date(session.created).toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
+    const tabPreviews = session.tabs.slice(0, 6).map(t => {
+      const favicon = getFaviconUrl(t.url);
+      const title = escapeHtml(t.title || t.url).slice(0, 40);
+      return `<div class="session-tab-preview">
+        ${favicon ? `<img src="${favicon}" class="session-tab-favicon" alt="">` : ""}
+        <span class="session-tab-title">${title}</span>
+      </div>`;
+    }).join("");
+    const moreCount = session.tabs.length > 6 ? `<div class="session-tab-more">+${session.tabs.length - 6} more</div>` : "";
+
+    card.innerHTML = `
+      <div class="session-card-header">
+        <span class="session-card-name" title="Click to rename">${escapeHtml(session.name)}</span>
+        <span class="session-card-meta">${session.tabs.length} tabs &middot; ${dateStr}</span>
+        <div class="session-card-actions">
+          <button class="btn btn-sm btn-add restore-session-btn">Restore</button>
+          <button class="btn btn-sm btn-delete delete-session-btn">Delete</button>
+        </div>
+      </div>
+      <div class="session-tab-list">${tabPreviews}${moreCount}</div>
+    `;
+
+    card.querySelector(".restore-session-btn").addEventListener("click", async () => {
+      const result = await chrome.runtime.sendMessage({ type: "restoreSession", id });
+      if (result.ok) {
+        showToast(`Restored ${result.count} tabs!`);
+      }
+    });
+
+    card.querySelector(".delete-session-btn").addEventListener("click", async () => {
+      if (!confirm(`Delete session "${session.name}"?`)) return;
+      await chrome.runtime.sendMessage({ type: "deleteSession", id });
+      delete sessions[id];
+      renderSessions();
+      showToast("Session deleted.");
+    });
+
+    card.querySelector(".session-card-name").addEventListener("click", async (e) => {
+      const nameEl = e.target;
+      const input = document.createElement("input");
+      input.type = "text";
+      input.value = session.name;
+      input.className = "session-rename-input";
+      nameEl.replaceWith(input);
+      input.focus();
+      input.select();
+
+      const save = async () => {
+        const newName = input.value.trim() || session.name;
+        await chrome.runtime.sendMessage({ type: "renameSession", id, name: newName });
+        session.name = newName;
+        renderSessions();
+        showToast("Session renamed.");
+      };
+      input.addEventListener("blur", save);
+      input.addEventListener("keydown", (ev) => { if (ev.key === "Enter") save(); });
+    });
+
+    container.appendChild(card);
+  }
+}
+
+async function handleSaveSession() {
+  const result = await chrome.runtime.sendMessage({ type: "saveSession" });
+  if (result.ok) {
+    await loadSessions();
+    renderSessions();
+    showToast(`Session saved with ${result.count} tabs!`);
+  }
+}
+
 // --- Broken Links UI ---
 
 async function loadBrokenLinks() {
@@ -1018,11 +1146,13 @@ document.addEventListener("DOMContentLoaded", async () => {
   await loadBrokenLinks();
   await loadUsageSummary();
   await loadSuggestions();
+  await loadSessions();
 
   updateStats();
   renderCategoryTabs();
   renderShortcuts();
   renderGroups();
+  renderSessions();
   renderAnalytics();
   renderSuggestions();
   populateGroupMemberCheckboxes("group-members-select");
@@ -1038,6 +1168,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     document.getElementById("import-file").click();
   });
   document.getElementById("import-file").addEventListener("change", handleImport);
+  document.getElementById("save-session-btn").addEventListener("click", handleSaveSession);
   document.getElementById("bulk-delete-btn").addEventListener("click", handleBulkDelete);
   document.getElementById("bulk-clear-btn").addEventListener("click", () => {
     selectedForDelete.clear();
